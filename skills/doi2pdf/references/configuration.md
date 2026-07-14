@@ -1,5 +1,9 @@
 # DOI2PDF configuration reference
 
+Prefer the HTML page launched by `doi2pdf-web` for first-time configuration. It writes keys
+to the local `.env`, loads them into the running process environment, and renders only their
+configured state afterward; it never sends a stored key back to the browser.
+
 ## Public metadata and OA
 
 | Variable | Purpose | Required |

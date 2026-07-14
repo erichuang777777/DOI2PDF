@@ -5,20 +5,23 @@ description: "Fetch and verify academic PDFs from a DOI through lawful, provenan
 
 # DOI2PDF
 
-Use the repository's `doi2pdf` package as the deterministic implementation. Preserve route
-provenance and stop after the first response verified as a PDF.
+Use the installed `doi2pdf` command as the deterministic implementation. Preserve route
+provenance and stop after the first response verified as a PDF. Keep keys and browser cookies
+out of prompts, command arguments, logs, and responses.
 
 ## Workflow
 
-1. Locate the repository containing `doi2pdf/cli.py`. Run commands from its root.
-2. Normalize and verify the DOI; never invent one. If only a title/PMID is available, resolve
+1. Run `doi2pdf doctor --json`. If the command is unavailable, run
+   `python scripts/install_cli.py` relative to this skill directory. Add `--with-browser` only
+   when institutional login is required and the user permits installing Chromium.
+2. If doctor returns `setup_required`, launch `doi2pdf-web` and direct the user to the local
+   HTML setup page. Never ask the user to paste an API key or password into chat.
+3. Normalize and verify the DOI; never invent one. If only a title/PMID is available, resolve
    it through a trustworthy metadata service before fetching.
-3. Run `python -m doi2pdf.cli doctor`. Explain missing optional settings only when their
-   corresponding layer is needed.
-4. Prefer `python -m doi2pdf.cli --json fetch <DOI> --no-institution` first. Parse the JSON
+4. Prefer `doi2pdf fetch <DOI> --no-institution --json` first. Parse the JSON
    envelope; do not scrape human logs.
 5. If OA/TDM routes fail and the user has legitimate subscription access, check that their
-   own OpenAthens or EZproxy prefix is configured. Run `python -m doi2pdf.cli login` when an
+   own OpenAthens or EZproxy prefix is configured. Run `doi2pdf login --json` when an
    interactive SSO/MFA session is needed, then retry without `--no-institution`.
 6. If all automatic routes fail, return `resolver_url` for manual completion. Do not add an
    unauthorized fallback.
@@ -54,13 +57,17 @@ CLI succeeds but the website appears not to provide a file, verify the result pa
 ## Commands
 
 ```powershell
-python -m doi2pdf.cli doctor
-python -m doi2pdf.cli resolve "https://doi.org/10.1186/s12984-023-01168-x"
-python -m doi2pdf.cli --json fetch 10.1186/s12984-023-01168-x --no-institution
-python -m doi2pdf.cli login
-python -m doi2pdf.cli --json fetch 10.1002/example --zotero-key 9ET75JMH --author Chen --year 2026
-python -m doi2pdf.cli --json batch-zotero --db "$HOME\Zotero\zotero.sqlite" --limit 10
+doi2pdf doctor --json
+doi2pdf resolve "https://doi.org/10.1186/s12984-023-01168-x" --json
+doi2pdf fetch 10.1186/s12984-023-01168-x --no-institution --json
+doi2pdf login --json
+doi2pdf fetch 10.1002/example --zotero-key 9ET75JMH --author Chen --year 2026 --json
+doi2pdf batch-zotero --db "$HOME\Zotero\zotero.sqlite" --limit 10 --json
 ```
+
+Treat exit `2` as invalid input/setup, `3` as no automatic PDF/manual completion, `4` as
+human login required, and `5` as an unexpected runtime failure. Always inspect `status` and
+`resolver_url` in the JSON envelope before deciding the next action.
 
 Read [references/configuration.md](references/configuration.md) when configuring API keys,
 Zotero translation-server, OpenAthens, EZproxy, or resolver templates.
