@@ -22,3 +22,8 @@ timestamps, request kind, and DOI—not credentials or cookies.
 The local web interface is a loopback-only wrapper around the same package. It has no
 separate retrieval logic, so CLI, web, Zotero batch, and agent-skill behavior share the same
 validation and safety invariants.
+
+On first launch, the web application requires a real API contact email and records setup
+completion in the ignored `.env`. Retrieved files are exposed to the browser only through
+random in-memory tokens; clients cannot request arbitrary filesystem paths. Tokens expire
+when the local server stops.

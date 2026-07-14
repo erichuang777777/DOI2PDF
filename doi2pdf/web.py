@@ -5,13 +5,14 @@ import json
 import os
 import threading
 import urllib.parse
+import uuid
 import webbrowser
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from . import __version__
 from .config import Settings
@@ -21,6 +22,8 @@ from .pipeline import DOI2PDF
 
 app = FastAPI(title="DOI2PDF", version=__version__)
 ENV_PATH = Path(os.getenv("DOI2PDF_ENV_FILE", ".env"))
+SECRET_ENV_KEYS = {"PUBMED_API_KEY", "S2_API_KEY", "ELSEVIER_TDM_KEY", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY"}
+_FILES: dict[str, Path] = {}
 
 
 def _layout(title: str, body: str) -> str:
@@ -35,8 +38,12 @@ h1{{font-size:2rem;margin:.2rem 0}} h2{{font-size:1.2rem;margin-top:0}} .muted{{
 label{{display:block;font-weight:650;margin-top:14px}} input{{width:100%;padding:11px;border:1px solid #aebdca;border-radius:8px;font:inherit}}
 .check{{display:flex;gap:9px;align-items:center;font-weight:500}} .check input{{width:auto}}
 button,.button{{display:inline-block;background:var(--blue);color:white;border:0;border-radius:9px;padding:11px 18px;font-weight:700;text-decoration:none;cursor:pointer;margin-top:18px}}
-.secondary{{background:#596b7b}} table{{width:100%;border-collapse:collapse;font-size:.9rem}} th,td{{text-align:left;border-bottom:1px solid var(--line);padding:8px;vertical-align:top;word-break:break-word}}
+.secondary{{background:#596b7b}} .success{{background:var(--ok)}} table{{width:100%;border-collapse:collapse;font-size:.9rem}} th,td{{text-align:left;border-bottom:1px solid var(--line);padding:8px;vertical-align:top;word-break:break-word}}
 .ok{{color:var(--ok);font-weight:700}} .bad{{color:var(--bad);font-weight:700}} code{{background:var(--pale);padding:2px 5px;border-radius:4px}} nav a{{margin-right:14px}}
+.steps{{display:flex;gap:8px;margin:20px 0}} .step{{flex:1;padding:9px;text-align:center;border-radius:8px;background:#e8edf2;color:var(--muted);font-size:.9rem}} .step.active{{background:var(--blue);color:white;font-weight:700}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}} .status{{border:1px solid var(--line);border-radius:9px;padding:12px}} .status strong{{display:block}}
+details{{margin-top:16px}} select{{width:100%;padding:11px;border:1px solid #aebdca;border-radius:8px;font:inherit;background:white}}
+#working{{display:none;position:fixed;inset:0;background:#f6f8faf2;z-index:9;align-items:center;justify-content:center;text-align:center;padding:20px}} #working.show{{display:flex}} .spinner{{width:48px;height:48px;border:5px solid #dbe7f0;border-top-color:var(--blue);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 18px}} @keyframes spin{{to{{transform:rotate(360deg)}}}}
 </style></head><body><main><nav><a href="/">Fetch</a><a href="/configure">Settings</a><a href="/health">Health</a></nav>{body}</main></body></html>"""
 
 
@@ -65,8 +72,8 @@ def _write_env(updates: dict[str, str]) -> None:
                 existing[key.strip()] = value
                 order.append(key.strip())
     for key, value in updates.items():
-        # Blank password-style fields mean "keep existing", not erase accidentally.
-        if value or key not in existing:
+        # Blank secret fields mean "keep existing"; ordinary fields can be cleared.
+        if value or key not in SECRET_ENV_KEYS or key not in existing:
             existing[key] = value.replace("\r", "").replace("\n", "")
         if key not in order:
             order.append(key)
@@ -78,21 +85,99 @@ def _parse_body(body: bytes) -> dict[str, str]:
     return {key: values[-1] for key, values in parsed.items()}
 
 
+def _register_file(path: Path) -> str:
+    resolved = path.resolve(strict=True)
+    token = uuid.uuid4().hex
+    _FILES[token] = resolved
+    if len(_FILES) > 100:
+        _FILES.pop(next(iter(_FILES)))
+    return token
+
+
+def _route_status(settings: Settings) -> str:
+    entries = (
+        ("Open access", bool(settings.unpaywall_email), "Unpaywall, OpenAlex, Europe PMC"),
+        ("Publisher APIs", bool(settings.elsevier_api_key or settings.wiley_tdm_token or settings.springer_api_key), "Optional Elsevier, Wiley, Springer keys"),
+        ("Library access", bool(settings.openathens_redirector_prefix or settings.ezproxy_prefix), "Your OpenAthens or EZproxy"),
+        ("Manual resolver", bool(settings.resolver_template), "SFX/OpenURL fallback"),
+    )
+    return '<div class="grid">' + "".join(
+        f'<div class="status"><strong>{"✓" if ready else "○"} {html.escape(name)}</strong><span class="muted">{html.escape(detail)}</span></div>'
+        for name, ready, detail in entries
+    ) + "</div>"
+
+
 @app.get("/", response_class=HTMLResponse)
-def home() -> str:
+def home():
     settings = _settings()
+    if settings.needs_setup():
+        return RedirectResponse("/setup", status_code=307)
     issues = settings.validate()
     warning = "" if not issues else '<p class="bad">' + html.escape(" ".join(issues)) + "</p>"
     return _layout("Fetch", f"""
 <h1>DOI2PDF</h1><p class="muted">One-click lawful paper retrieval for clinical and research work.</p>
+<section class="card"><h2>Your retrieval routes</h2>{_route_status(settings)}</section>
 {warning}<section class="card"><h2>Retrieve a paper</h2>
-<form method="post" action="/fetch">
+<form id="fetch-form" method="post" action="/fetch">
 <label for="identifier">DOI, PMID, DOI URL, or exact title</label><input id="identifier" name="identifier" required autofocus placeholder="10.1186/s12984-023-01168-x">
-<label for="output_dir">Download folder</label><input id="output_dir" name="output_dir" value="downloads">
-<label for="zotero_key">Zotero key (optional)</label><input id="zotero_key" name="zotero_key" maxlength="8" placeholder="9ET75JMH">
+<label for="output_dir">Save folder</label><input id="output_dir" name="output_dir" value="{html.escape(str(settings.download_dir), quote=True)}">
+<details><summary>Optional Zotero filename</summary><label for="zotero_key">Zotero item key</label><input id="zotero_key" name="zotero_key" maxlength="8" placeholder="9ET75JMH"></details>
 <label class="check"><input type="checkbox" name="use_institution" value="1" checked> Use my configured OpenAthens/EZproxy session after OA and TDM routes</label>
 <button type="submit">Retrieve PDF</button></form></section>
-<section class="card"><h2>Safety</h2><p>This tool uses public OA sources, official publisher APIs, and your own authorized library session. It does not bypass paywalls or share credentials. Institutional retrieval is serialized, delayed, and daily-limited.</p></section>""")
+<section class="card"><h2>Safety</h2><p>This tool uses public OA sources, official publisher APIs, and your own authorized library session. It does not bypass paywalls or share credentials. Institutional retrieval is serialized, delayed, and daily-limited.</p></section>
+<div id="working"><div><div class="spinner"></div><h2>Searching for a verified PDF…</h2><p class="muted">Checking open access, publisher APIs, then your library routes. This can take up to a minute.</p></div></div>
+<script>document.getElementById('fetch-form').addEventListener('submit',()=>{{document.getElementById('working').classList.add('show')}});</script>""")
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def setup() -> str:
+    settings = _settings()
+    return _layout("Welcome", f"""
+<h1>Welcome to DOI2PDF</h1><p class="muted">A short setup makes the retrieval routes work correctly. Required fields are marked; everything else can be added later.</p>
+<div class="steps"><div class="step active">1 · Essentials</div><div class="step active">2 · Library</div><div class="step active">3 · Ready</div></div>
+<form method="post" action="/setup">
+<section class="card"><h2>1. Essential setup</h2><p>Scholarly services require a real contact email for responsible API use. It is not used to sign into your library.</p>
+<label>Your contact email (required)</label><input type="email" name="DOI2PDF_CONTACT_EMAIL" value="{html.escape('' if settings.contact_email.lower() in {'you@example.org','your@email.com'} else settings.contact_email, quote=True)}" required placeholder="doctor@hospital.org">
+<label>Where should PDFs be saved?</label><input name="DOWNLOAD_DIR" value="{html.escape(str(settings.download_dir), quote=True)}" placeholder="downloads"></section>
+<section class="card"><h2>2. Library access (optional)</h2><p>Open-access papers work without this section. For subscribed papers, paste the prefix supplied by your own library. Never enter your library password here.</p>
+<label>OpenAthens redirector prefix</label><input name="OPENATHENS_REDIRECTOR_PREFIX" value="{html.escape(settings.openathens_redirector_prefix, quote=True)}" placeholder="https://go.openathens.net/redirector/YOUR-DOMAIN?url=">
+<p class="muted">Usually found in your library portal or OpenAthens Redirector link generator.</p>
+<label>EZproxy login prefix</label><input name="EZPROXY_PREFIX" value="{html.escape(settings.ezproxy_prefix, quote=True)}" placeholder="https://login.yourlibrary.edu/login?url=">
+<label>Library resolver / SFX template</label><input name="LIBRARY_RESOLVER_TEMPLATE" value="{html.escape(settings.resolver_template, quote=True)}" placeholder="https://resolver.yourlibrary.edu/openurl?doi={{doi}}"></section>
+<section class="card"><h2>3. Optional API keys</h2><p>You can skip these now. They improve rate limits or enable official publisher retrieval.</p><details><summary>Show optional keys</summary>
+<label>PubMed API key <span class="muted">({_masked(settings.pubmed_api_key)})</span></label><input type="password" name="PUBMED_API_KEY" autocomplete="off">
+<label>Semantic Scholar API key <span class="muted">({_masked(settings.semantic_scholar_api_key)})</span></label><input type="password" name="S2_API_KEY" autocomplete="off">
+<label>Elsevier TDM key <span class="muted">({_masked(settings.elsevier_api_key)})</span></label><input type="password" name="ELSEVIER_TDM_KEY" autocomplete="off">
+<label>Wiley TDM token <span class="muted">({_masked(settings.wiley_tdm_token)})</span></label><input type="password" name="WILEY_TDM_TOKEN" autocomplete="off">
+<label>Springer API key <span class="muted">({_masked(settings.springer_api_key)})</span></label><input type="password" name="SPRINGER_API_KEY" autocomplete="off"></details>
+<button type="submit">Save and start DOI2PDF</button></section></form>""")
+
+
+@app.post("/setup", response_class=HTMLResponse)
+async def save_setup(request: Request):
+    form = _parse_body(await request.body())
+    email = form.get("DOI2PDF_CONTACT_EMAIL", "").strip()
+    candidate = Settings(
+        contact_email=email,
+        unpaywall_email=email,
+        setup_complete=True,
+        openathens_redirector_prefix=form.get("OPENATHENS_REDIRECTOR_PREFIX", "").strip(),
+        ezproxy_prefix=form.get("EZPROXY_PREFIX", "").strip(),
+        resolver_template=form.get("LIBRARY_RESOLVER_TEMPLATE", "").strip(),
+    )
+    if candidate.validate():
+        problems = "<br>".join(html.escape(issue) for issue in candidate.validate())
+        return _layout("Setup problem", f'<section class="card"><h2>Please check these settings</h2><p class="bad">{problems}</p><a class="button" href="/setup">Return to setup</a></section>')
+    allowed = {
+        "DOI2PDF_CONTACT_EMAIL", "DOWNLOAD_DIR", "PUBMED_API_KEY", "S2_API_KEY",
+        "ELSEVIER_TDM_KEY", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
+        "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "LIBRARY_RESOLVER_TEMPLATE",
+    }
+    updates = {key: value.strip() for key, value in form.items() if key in allowed}
+    updates["UNPAYWALL_EMAIL"] = email
+    updates["DOI2PDF_SETUP_COMPLETE"] = "true"
+    _write_env(updates)
+    return RedirectResponse("/", status_code=303)
 
 
 @app.post("/fetch", response_class=HTMLResponse)
@@ -118,6 +203,7 @@ async def fetch(request: Request) -> str:
             )
             provisional.replace(final_path)
             result.path = final_path
+            file_token = _register_file(final_path)
     except Exception as exc:
         return _layout("Error", f'<section class="card"><h2>Retrieval error</h2><p class="bad">{html.escape(type(exc).__name__ + ": " + str(exc))}</p><a class="button" href="/">Try again</a></section>')
 
@@ -127,7 +213,7 @@ async def fetch(request: Request) -> str:
         for attempt in result.attempts
     )
     if result.ok:
-        summary = f'<p class="ok">PDF retrieved successfully.</p><p><strong>File:</strong> <code>{html.escape(str(result.path.resolve()))}</code></p><p><strong>Route:</strong> {html.escape(str(result.layer))} / {html.escape(str(result.route))} · {result.bytes:,} bytes</p>'
+        summary = f'<p class="ok">PDF retrieved successfully.</p><p><strong>Saved as:</strong> <code>{html.escape(result.path.name)}</code></p><p><strong>Route:</strong> {html.escape(str(result.layer))} / {html.escape(str(result.route))} · {result.bytes:,} bytes</p><p><a class="button success" target="_blank" href="/files/{file_token}">Open PDF</a> <a class="button secondary" href="/files/{file_token}?download=1">Download a copy</a></p><p class="muted">Local folder: {html.escape(str(result.path.resolve().parent))}</p>'
     else:
         resolver = f'<p><a class="button secondary" target="_blank" href="{html.escape(result.resolver_url, quote=True)}">Open library resolver</a></p>' if result.resolver_url else ""
         summary = '<p class="bad">No automatic route produced a verified PDF.</p>' + resolver
@@ -142,6 +228,7 @@ def configure() -> str:
 <section class="card"><form method="post" action="/configure">
 <label>Contact email</label><input type="email" name="DOI2PDF_CONTACT_EMAIL" value="{html.escape(settings.contact_email, quote=True)}" required>
 <label>Unpaywall email</label><input type="email" name="UNPAYWALL_EMAIL" value="{html.escape(settings.unpaywall_email, quote=True)}">
+<label>Default PDF folder</label><input name="DOWNLOAD_DIR" value="{html.escape(str(settings.download_dir), quote=True)}">
 <label>PubMed API key <span class="muted">({_masked(settings.pubmed_api_key)})</span></label><input type="password" name="PUBMED_API_KEY" autocomplete="off">
 <label>Semantic Scholar API key <span class="muted">({_masked(settings.semantic_scholar_api_key)})</span></label><input type="password" name="S2_API_KEY" autocomplete="off">
 <label>Elsevier TDM key <span class="muted">({_masked(settings.elsevier_api_key)})</span></label><input type="password" name="ELSEVIER_TDM_KEY" autocomplete="off">
@@ -157,12 +244,25 @@ def configure() -> str:
 @app.post("/configure")
 async def save_configuration(request: Request):
     allowed = {
-        "DOI2PDF_CONTACT_EMAIL", "UNPAYWALL_EMAIL", "PUBMED_API_KEY", "S2_API_KEY",
+        "DOI2PDF_CONTACT_EMAIL", "UNPAYWALL_EMAIL", "DOWNLOAD_DIR", "PUBMED_API_KEY", "S2_API_KEY",
         "ELSEVIER_TDM_KEY", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
         "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "LIBRARY_RESOLVER_TEMPLATE",
     }
     form = _parse_body(await request.body())
-    _write_env({key: value.strip() for key, value in form.items() if key in allowed})
+    updates = {key: value.strip() for key, value in form.items() if key in allowed}
+    candidate = Settings(
+        contact_email=updates.get("DOI2PDF_CONTACT_EMAIL", ""),
+        unpaywall_email=updates.get("UNPAYWALL_EMAIL", ""),
+        setup_complete=True,
+        openathens_redirector_prefix=updates.get("OPENATHENS_REDIRECTOR_PREFIX", ""),
+        ezproxy_prefix=updates.get("EZPROXY_PREFIX", ""),
+        resolver_template=updates.get("LIBRARY_RESOLVER_TEMPLATE", ""),
+    )
+    if candidate.validate():
+        problems = "<br>".join(html.escape(issue) for issue in candidate.validate())
+        return _layout("Settings problem", f'<section class="card"><h2>Please check these settings</h2><p class="bad">{problems}</p><a class="button" href="/configure">Return to settings</a></section>')
+    updates["DOI2PDF_SETUP_COMPLETE"] = "true"
+    _write_env(updates)
     return RedirectResponse("/configure?saved=1", status_code=303)
 
 
@@ -180,7 +280,8 @@ async def institution_login() -> str:
 def health() -> JSONResponse:
     settings = _settings()
     return JSONResponse({
-        "ok": not settings.validate(), "version": __version__, "issues": settings.validate(),
+        "ok": not settings.needs_setup(), "version": __version__, "issues": settings.validate(),
+        "setup_complete": not settings.needs_setup(),
         "routes": {
             "unpaywall": bool(settings.unpaywall_email),
             "zotero_translation_server": settings.translator_enabled,
@@ -189,6 +290,15 @@ def health() -> JSONResponse:
             "resolver": bool(settings.resolver_template),
         },
     })
+
+
+@app.get("/files/{token}")
+def serve_file(token: str, download: bool = False):
+    path = _FILES.get(token)
+    if not path or not path.is_file():
+        raise HTTPException(status_code=404, detail="This PDF link has expired. Retrieve the paper again.")
+    disposition = "attachment" if download else "inline"
+    return FileResponse(path, media_type="application/pdf", filename=path.name, content_disposition_type=disposition)
 
 
 def main() -> None:

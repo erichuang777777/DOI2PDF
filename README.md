@@ -22,11 +22,15 @@ The JSON result records every route and its provenance.
 
 Double-click **`DOI2PDF.bat`**. On the first run it creates an isolated environment,
 installs DOI2PDF and Chromium, copies the local settings template, starts the server on
-`127.0.0.1`, and opens the browser interface. Later starts reuse the installation.
+`127.0.0.1`, and opens a guided browser setup. Enter a real contact email, choose the PDF
+folder, and optionally add your own library access links or publisher API keys. Later starts
+reuse the installation and go directly to retrieval.
 
 The interface accepts a DOI, DOI URL, PMID, or exact title and shows the complete route
-report. Its Settings page stores API keys and institutional link prefixes only in the
-Git-ignored local `.env`; it never asks for or stores an OpenAthens password.
+report. After success, use **Open PDF** to view it in the browser or **Download a copy** to
+use the browser's normal download workflow. Its Settings page stores API keys and
+institutional link prefixes only in the Git-ignored local `.env`; it never asks for or
+stores an OpenAthens password.
 
 ## Red lines
 
