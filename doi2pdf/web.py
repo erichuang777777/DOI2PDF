@@ -4,6 +4,7 @@ import html
 import json
 import os
 import threading
+import time
 import urllib.parse
 import uuid
 import webbrowser
@@ -27,12 +28,15 @@ SECRET_ENV_KEYS = {
     "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
 }
 _FILES: dict[str, Path] = {}
+_JOBS: dict[str, dict[str, Any]] = {}
+_JOB_LOCK = threading.RLock()
+MAX_ACTIVE_WEB_JOBS = 2
 
 
 @app.middleware("http")
 async def prevent_settings_cache(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path in {"/setup", "/configure"}:
+    if request.url.path in {"/setup", "/configure"} or request.url.path.startswith(("/api/jobs", "/jobs/")):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -56,7 +60,9 @@ button,.button{{display:inline-block;background:var(--blue);color:white;border:0
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}} .status{{border:1px solid var(--line);border-radius:9px;padding:12px}} .status strong{{display:block}}
 details{{margin-top:16px}} select{{width:100%;padding:11px;border:1px solid #aebdca;border-radius:8px;font:inherit;background:white}}
 #working{{display:none;position:fixed;inset:0;background:#f6f8faf2;z-index:9;align-items:center;justify-content:center;text-align:center;padding:20px}} #working.show{{display:flex}} .spinner{{width:48px;height:48px;border:5px solid #dbe7f0;border-top-color:var(--blue);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 18px}} @keyframes spin{{to{{transform:rotate(360deg)}}}}
-</style></head><body><main><nav><a href="/">Fetch</a><a href="/configure">Settings</a><a href="/health">Health</a></nav>{body}</main></body></html>"""
+.progress-track{{height:16px;background:#e1e8ee;border-radius:999px;overflow:hidden}} .progress-bar{{height:100%;width:0;background:var(--blue);transition:width .35s ease}}
+.log{{list-style:none;padding:0;margin:0;max-height:360px;overflow:auto}} .log li{{padding:9px 0;border-bottom:1px solid var(--line);font-family:ui-monospace,Consolas,monospace;font-size:.86rem}} .pill{{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--pale);font-size:.78rem}}
+</style></head><body><main><nav><a href="/">Fetch</a><a href="/activity">Activity</a><a href="/configure">Settings</a><a href="/health">Health</a></nav>{body}</main></body></html>"""
 
 
 def _settings() -> Settings:
@@ -120,6 +126,69 @@ def _register_file(path: Path) -> str:
     return token
 
 
+def _redact(value: str) -> str:
+    text = str(value).replace("\r", " ").replace("\n", " ")[:500]
+    for key in SECRET_ENV_KEYS:
+        secret = os.getenv(key, "")
+        if secret:
+            text = text.replace(secret, "[redacted]")
+    return text
+
+
+def _job_event(job_id: str, event: dict[str, Any], *, state: str | None = None) -> None:
+    clean = {
+        "time": time.strftime("%H:%M:%S", time.localtime()),
+        "percent": max(0, min(100, int(event.get("percent", 0)))),
+        "stage": _redact(event.get("stage", "working")),
+        "message": _redact(event.get("message", "Working")),
+    }
+    for key in ("source", "status"):
+        if event.get(key):
+            clean[key] = _redact(event[key])
+    with _JOB_LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return
+        job.update({"percent": clean["percent"], "stage": clean["stage"], "message": clean["message"], "updated_at": time.time()})
+        if state:
+            job["state"] = state
+        job["events"].append(clean)
+        del job["events"][:-100]
+
+
+def _new_job(identifier: str) -> str:
+    with _JOB_LOCK:
+        active = sum(job["state"] in {"queued", "running"} for job in _JOBS.values())
+        if active >= MAX_ACTIVE_WEB_JOBS:
+            raise RuntimeError("Two retrievals are already running. Wait for one to finish.")
+        job_id = uuid.uuid4().hex
+        now = time.time()
+        _JOBS[job_id] = {
+            "id": job_id, "identifier": _redact(identifier), "state": "queued", "percent": 0,
+            "stage": "queued", "message": "Waiting to start", "created_at": now, "updated_at": now,
+            "events": [], "result": None, "file_token": None, "error": None,
+        }
+        if len(_JOBS) > 50:
+            oldest_finished = next((key for key, value in _JOBS.items() if value["state"] not in {"queued", "running"}), None)
+            if oldest_finished and oldest_finished != job_id:
+                _JOBS.pop(oldest_finished, None)
+    _job_event(job_id, {"percent": 0, "stage": "queued", "message": "Retrieval queued"})
+    return job_id
+
+
+def _job_snapshot(job: dict[str, Any]) -> dict[str, Any]:
+    result = job.get("result")
+    payload = {key: job[key] for key in ("id", "identifier", "state", "percent", "stage", "message", "created_at", "updated_at", "events", "error")}
+    payload["result_url"] = f'/jobs/{job["id"]}/result' if result is not None else None
+    if result is not None:
+        payload["result"] = {
+            "ok": result.ok, "doi": result.doi, "layer": result.layer, "route": result.route,
+            "bytes": result.bytes, "filename": result.path.name if result.path else None,
+            "resolver_url": result.resolver_url,
+        }
+    return payload
+
+
 def _route_status(settings: Settings) -> str:
     entries = (
         ("Open access", bool(settings.unpaywall_email), "Unpaywall, OpenAlex, Europe PMC"),
@@ -151,7 +220,7 @@ def home():
 <label class="check"><input type="checkbox" name="use_institution" value="1" checked> Use my configured OpenAthens/EZproxy session after OA and TDM routes</label>
 <button type="submit">Retrieve PDF</button></form></section>
 <section class="card"><h2>Safety</h2><p>This tool uses public OA sources, official publisher APIs, and your own authorized library session. It does not bypass paywalls or share credentials. Institutional retrieval is serialized, delayed, and daily-limited.</p></section>
-<div id="working"><div><div class="spinner"></div><h2>Searching for a verified PDF…</h2><p class="muted">Checking open access, publisher APIs, then your library routes. This can take up to a minute.</p></div></div>
+<div id="working"><div><div class="spinner"></div><h2>Starting the live tracker…</h2><p class="muted">The progress page will show each lawful retrieval layer as it runs.</p></div></div>
 <script>document.getElementById('fetch-form').addEventListener('submit',()=>{{document.getElementById('working').classList.add('show')}});</script>""")
 
 
@@ -207,36 +276,66 @@ async def save_setup(request: Request):
     return RedirectResponse("/", status_code=303)
 
 
-@app.post("/fetch", response_class=HTMLResponse)
-async def fetch(request: Request) -> str:
-    form = _parse_body(await request.body())
+def _run_fetch_job(job_id: str, form: dict[str, str]) -> None:
     identifier = form.get("identifier", "").strip()
     output_dir = Path(form.get("output_dir", "downloads") or "downloads")
     use_institution = form.get("use_institution") == "1"
-    if not identifier:
-        return _layout("Error", '<section class="card"><p class="bad">An identifier is required.</p></section>')
-
-    client = DOI2PDF(_settings())
+    provisional = output_dir / f".{job_id}.download.pdf"
+    _job_event(job_id, {"percent": 2, "stage": "starting", "message": "Starting retrieval"}, state="running")
     try:
-        doi = await run_in_threadpool(client.identifiers.resolve, identifier)
-        provisional = output_dir / f".{doi.replace('/', '_')}.download.pdf"
-        result = await run_in_threadpool(client.fetch, doi, provisional, use_institution)
+        client = DOI2PDF(_settings())
+        result = client.fetch(identifier, provisional, use_institution, progress=lambda event: _job_event(job_id, event))
         if result.ok:
             final_path = build_pdf_path(
                 output_dir,
                 zotero_key=form.get("zotero_key") or None,
-                doi=doi,
+                doi=result.doi,
                 metadata=result.metadata.get("zotero") or {},
             )
             provisional.replace(final_path)
             result.path = final_path
             file_token = _register_file(final_path)
+        else:
+            file_token = None
+        with _JOB_LOCK:
+            job = _JOBS[job_id]
+            job["result"] = result
+            job["file_token"] = file_token
+            job["state"] = "succeeded" if result.ok else "manual_required"
+            job["percent"] = 100
+            job["updated_at"] = time.time()
     except Exception as exc:
-        return _layout("Error", f'<section class="card"><h2>Retrieval error</h2><p class="bad">{html.escape(type(exc).__name__ + ": " + str(exc))}</p><a class="button" href="/">Try again</a></section>')
+        provisional.unlink(missing_ok=True)
+        message = _redact(f"{type(exc).__name__}: {exc}")
+        with _JOB_LOCK:
+            job = _JOBS[job_id]
+            job.update({"state": "failed", "percent": 100, "stage": "failed", "message": "Retrieval failed", "error": message, "updated_at": time.time()})
+        _job_event(job_id, {"percent": 100, "stage": "failed", "message": "Retrieval failed", "status": type(exc).__name__}, state="failed")
+
+
+@app.post("/fetch", response_class=HTMLResponse)
+async def fetch(request: Request):
+    form = _parse_body(await request.body())
+    identifier = form.get("identifier", "").strip()
+    if not identifier:
+        return _layout("Error", '<section class="card"><p class="bad">An identifier is required.</p></section>')
+    try:
+        job_id = _new_job(identifier)
+    except Exception as exc:
+        return _layout("Busy", f'<section class="card"><h2>Retrieval queue is full</h2><p class="bad">{html.escape(str(exc))}</p><a class="button" href="/activity">Open activity monitor</a></section>')
+    threading.Thread(target=_run_fetch_job, args=(job_id, form), daemon=True, name=f"doi2pdf-{job_id[:8]}").start()
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
+def _render_result(job: dict[str, Any]) -> str:
+    result = job.get("result")
+    if result is None:
+        raise HTTPException(status_code=409, detail="Retrieval is still running")
+    file_token = job.get("file_token")
 
     rows = "".join(
         f"<tr><td>{html.escape(attempt.layer)}</td><td>{html.escape(attempt.source)}</td>"
-        f"<td>{html.escape(attempt.status)}</td><td>{html.escape(attempt.detail or '')}</td></tr>"
+        f"<td>{html.escape(attempt.status)}</td><td>{html.escape(_redact(attempt.detail or ''))}</td></tr>"
         for attempt in result.attempts
     )
     if result.ok:
@@ -245,6 +344,58 @@ async def fetch(request: Request) -> str:
         resolver = f'<p><a class="button secondary" target="_blank" href="{html.escape(result.resolver_url, quote=True)}">Open library resolver</a></p>' if result.resolver_url else ""
         summary = '<p class="bad">No automatic route produced a verified PDF.</p>' + resolver
     return _layout("Result", f'<h1>Result</h1><section class="card">{summary}<p><strong>DOI:</strong> {html.escape(result.doi)}</p></section><section class="card"><h2>Route report</h2><table><thead><tr><th>Layer</th><th>Source</th><th>Status</th><th>Detail</th></tr></thead><tbody>{rows}</tbody></table></section><a class="button" href="/">Retrieve another</a>')
+
+
+@app.get("/jobs/{job_id}", response_class=HTMLResponse)
+def job_progress(job_id: str) -> str:
+    with _JOB_LOCK:
+        if job_id not in _JOBS:
+            raise HTTPException(status_code=404, detail="Retrieval job not found")
+    return _layout("Progress", f"""
+<h1>Retrieval progress</h1><p class="muted">This page updates automatically. You may also watch all jobs in <a href="/activity">Activity</a>.</p>
+<section class="card"><div class="progress-track"><div id="bar" class="progress-bar"></div></div><p><strong id="percent">0%</strong> · <span id="stage">Queued</span></p><p id="message" class="muted">Waiting to start</p><p id="done"></p></section>
+<section class="card"><h2>Live route log</h2><ul id="events" class="log"></ul></section>
+<script>
+const jobId={json.dumps(job_id)}; const seen=new Set();
+function addEvent(event){{if(seen.has(event.time+'|'+event.stage+'|'+event.message+'|'+event.percent))return;seen.add(event.time+'|'+event.stage+'|'+event.message+'|'+event.percent);const li=document.createElement('li');li.textContent=`${{event.time}}  ${{event.percent}}%  [${{event.stage}}] ${{event.message}}${{event.source?' · '+event.source:''}}${{event.status?' · '+event.status:''}}`;document.getElementById('events').appendChild(li);}}
+async function poll(){{const response=await fetch(`/api/jobs/${{jobId}}`,{{cache:'no-store'}});if(!response.ok)return;const job=await response.json();document.getElementById('bar').style.width=job.percent+'%';document.getElementById('percent').textContent=job.percent+'%';document.getElementById('stage').textContent=job.stage;document.getElementById('message').textContent=job.message;job.events.forEach(addEvent);if(job.result_url){{const a=document.createElement('a');a.className='button success';a.href=job.result_url;a.textContent=job.result&&job.result.ok?'Open result and PDF':'Open route report';document.getElementById('done').replaceChildren(a);return;}}if(job.state==='failed'){{document.getElementById('done').textContent=job.error||'Retrieval failed';return;}}setTimeout(poll,700);}}poll();
+</script>""")
+
+
+@app.get("/jobs/{job_id}/result", response_class=HTMLResponse)
+def job_result(job_id: str) -> str:
+    with _JOB_LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Retrieval job not found")
+        return _render_result(job)
+
+
+@app.get("/api/jobs/{job_id}")
+def job_status(job_id: str) -> JSONResponse:
+    with _JOB_LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Retrieval job not found")
+        return JSONResponse(_job_snapshot(job))
+
+
+@app.get("/api/jobs")
+def jobs_status() -> JSONResponse:
+    with _JOB_LOCK:
+        jobs = sorted(_JOBS.values(), key=lambda item: item["created_at"], reverse=True)
+        return JSONResponse({"jobs": [_job_snapshot(job) for job in jobs]})
+
+
+@app.get("/activity", response_class=HTMLResponse)
+def activity() -> str:
+    return _layout("Activity", """
+<h1>Activity monitor</h1><p class="muted">Live, in-memory retrieval status. Logs are sanitized, contain no API keys or cookies, and reset when DOI2PDF restarts.</p>
+<section class="card"><table><thead><tr><th>Paper</th><th>Status</th><th>Progress</th><th>Current step</th><th></th></tr></thead><tbody id="jobs"></tbody></table><p id="empty" class="muted">No retrievals yet.</p></section>
+<section class="card"><h2>Recent route events</h2><ul id="activity-events" class="log"></ul></section>
+<script>
+async function poll(){{const response=await fetch('/api/jobs',{{cache:'no-store'}});const data=await response.json();const body=document.getElementById('jobs');const feed=document.getElementById('activity-events');body.replaceChildren();feed.replaceChildren();document.getElementById('empty').style.display=data.jobs.length?'none':'block';const events=[];for(const job of data.jobs){{const tr=document.createElement('tr');for(const value of [job.identifier,job.state,job.percent+'%',job.message]){{const td=document.createElement('td');td.textContent=value;tr.appendChild(td);}}const td=document.createElement('td');const a=document.createElement('a');a.href='/jobs/'+job.id;a.textContent='View';td.appendChild(a);tr.appendChild(td);body.appendChild(tr);for(const event of job.events)events.push({{job,event}});}}for(const item of events.slice(-30).reverse()){{const li=document.createElement('li');li.textContent=`${{item.event.time}}  ${{item.job.identifier}}  [${{item.event.stage}}] ${{item.event.message}}`;feed.appendChild(li);}}setTimeout(poll,1000);}}poll();
+</script>""")
 
 
 @app.get("/configure", response_class=HTMLResponse)
@@ -307,9 +458,13 @@ async def institution_login() -> str:
 @app.get("/health")
 def health() -> JSONResponse:
     settings = _settings()
+    with _JOB_LOCK:
+        active_jobs = sum(job["state"] in {"queued", "running"} for job in _JOBS.values())
+        recent_jobs = len(_JOBS)
     return JSONResponse({
         "ok": not settings.needs_setup(), "version": __version__, "issues": settings.validate(),
         "setup_complete": not settings.needs_setup(),
+        "jobs": {"active": active_jobs, "recent": recent_jobs},
         "routes": {
             "unpaywall": bool(settings.unpaywall_email),
             "zotero_translation_server": settings.translator_enabled,

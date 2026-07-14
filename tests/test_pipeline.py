@@ -32,6 +32,19 @@ def test_pipeline_stops_at_verified_oa_candidate(tmp_path: Path):
     assert output.read_bytes() == PDF
 
 
+def test_pipeline_emits_sanitized_progress_events(tmp_path: Path):
+    events = []
+    app = DOI2PDF(Settings(translator_enabled=False), http=FakeHttp())
+    app.oa.candidates = lambda doi: ([Candidate("https://example.org/good.pdf", "openalex", "open_access")], [])
+    app.tdm.routes = lambda doi: (_ for _ in ())
+    result = app.fetch("10.1234/example", tmp_path / "paper.pdf", use_institution=False, progress=events.append)
+    assert result.ok
+    assert events[0]["stage"] == "resolving"
+    assert events[-1]["stage"] == "complete"
+    assert events[-1]["percent"] == 100
+    assert all("url" not in event and "detail" not in event for event in events)
+
+
 def test_manual_resolver_is_final_layer(tmp_path: Path):
     settings = Settings(
         translator_enabled=False,
@@ -45,3 +58,13 @@ def test_manual_resolver_is_final_layer(tmp_path: Path):
     assert result.resolver_url == "https://resolver.example/?doi=10.1234/example"
     assert result.attempts[-1].layer == "resolver"
     assert result.attempts[-1].status == "manual_required"
+
+
+def test_manual_resolver_completes_progress(tmp_path: Path):
+    events = []
+    app = DOI2PDF(Settings(translator_enabled=False), http=FakeHttp())
+    app.oa.candidates = lambda doi: ([], [])
+    app.tdm.routes = lambda doi: (_ for _ in ())
+    app.fetch("10.1234/example", tmp_path / "paper.pdf", use_institution=False, progress=events.append)
+    assert events[-1]["stage"] == "resolver"
+    assert events[-1]["status"] == "manual_required"
