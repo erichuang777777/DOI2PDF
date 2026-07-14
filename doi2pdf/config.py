@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -8,6 +9,10 @@ from pathlib import Path
 def _bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
     return default if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+PLACEHOLDER_EMAILS = {"you@example.org", "your@email.com", "evolved@zotero.org"}
 
 
 @dataclass
@@ -25,6 +30,8 @@ class Settings:
     openathens_redirector_prefix: str = ""
     ezproxy_prefix: str = ""
     resolver_template: str = ""
+    download_dir: Path = field(default_factory=lambda: Path("downloads"))
+    setup_complete: bool = False
     browser_profile: Path = field(default_factory=lambda: Path.home() / ".doi2pdf" / "browser")
     browser_headless: bool = False
     request_timeout_s: int = 45
@@ -54,6 +61,8 @@ class Settings:
             openathens_redirector_prefix=os.getenv("OPENATHENS_REDIRECTOR_PREFIX", ""),
             ezproxy_prefix=os.getenv("EZPROXY_PREFIX", ""),
             resolver_template=os.getenv("LIBRARY_RESOLVER_TEMPLATE", ""),
+            download_dir=Path(os.getenv("DOWNLOAD_DIR", "downloads")),
+            setup_complete=_bool("DOI2PDF_SETUP_COMPLETE", False),
             browser_profile=Path(os.getenv("DOI2PDF_BROWSER_PROFILE", str(Path.home() / ".doi2pdf" / "browser"))),
             browser_headless=_bool("DOI2PDF_BROWSER_HEADLESS", False),
             request_timeout_s=int(os.getenv("DOI2PDF_REQUEST_TIMEOUT_S", "45")),
@@ -72,12 +81,20 @@ class Settings:
 
     def validate(self) -> list[str]:
         issues: list[str] = []
-        if not (self.contact_email or self.unpaywall_email):
-            issues.append("Set DOI2PDF_CONTACT_EMAIL or UNPAYWALL_EMAIL for polite API access.")
+        email = (self.contact_email or self.unpaywall_email).strip().lower()
+        if not email or email in PLACEHOLDER_EMAILS or not EMAIL_RE.match(email):
+            issues.append("Enter your real contact email for polite scholarly API access.")
         for name, value in (
             ("OPENATHENS_REDIRECTOR_PREFIX", self.openathens_redirector_prefix),
             ("EZPROXY_PREFIX", self.ezproxy_prefix),
         ):
             if value and not value.startswith("https://"):
                 issues.append(f"{name} must start with https://")
+        if self.openathens_redirector_prefix and "url=" not in self.openathens_redirector_prefix:
+            issues.append("OPENATHENS_REDIRECTOR_PREFIX should end with ?url= or &url=.")
+        if self.resolver_template and "{doi}" not in self.resolver_template:
+            issues.append("LIBRARY_RESOLVER_TEMPLATE must contain {doi}.")
         return issues
+
+    def needs_setup(self) -> bool:
+        return not self.setup_complete or bool(self.validate())

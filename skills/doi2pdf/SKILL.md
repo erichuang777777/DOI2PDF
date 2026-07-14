@@ -25,6 +25,11 @@ provenance and stop after the first response verified as a PDF.
 7. Report the winning `layer`, `route`, output path, byte count, hash, and relevant failed
    route statuses. Never expose keys, cookies, headers, or credentials.
 
+For nontechnical local use, launch `DOI2PDF.bat`. Complete `/setup` on first run, retrieve
+from the Fetch page, then use the tokenized **Open PDF** or **Download a copy** button. If the
+CLI succeeds but the website appears not to provide a file, verify the result page contains
+`/files/<token>` and check `/health`; never expose a raw user-supplied filesystem path.
+
 ## Zotero behavior
 
 - Keep Zotero translation-server on loopback as a separate process. DOI2PDF uses `/search`

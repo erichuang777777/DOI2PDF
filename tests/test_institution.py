@@ -55,3 +55,9 @@ def test_rate_settings_cannot_be_disabled(monkeypatch):
     settings = Settings.from_env()
     assert settings.min_institution_interval_s == 15
     assert settings.max_institution_requests_per_day == 100
+
+
+def test_placeholder_email_requires_first_run_setup():
+    settings = Settings(contact_email="you@example.org", setup_complete=True)
+    assert settings.needs_setup()
+    assert "real contact email" in settings.validate()[0]

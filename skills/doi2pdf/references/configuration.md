@@ -8,6 +8,8 @@
 | `UNPAYWALL_EMAIL` | Unpaywall v2 API identity | For Unpaywall |
 | `PUBMED_API_KEY` | NCBI id-converter quota | Optional |
 | `S2_API_KEY` | Semantic Scholar quota | Optional |
+| `DOI2PDF_SETUP_COMPLETE` | First-run web wizard state | Written by UI |
+| `DOWNLOAD_DIR` | Default local PDF folder | Optional |
 
 ## Official publisher TDM
 
@@ -25,8 +27,8 @@ Users must register their own keys and comply with publisher terms. Never print 
 - `DOI2PDF_TRANSLATOR_ENABLED=true`
 - `ZOTERO_TRANSLATION_SERVER=http://127.0.0.1:1969`
 
-Run the bundled `zoteor_translator/translation-server` separately. The server is AGPL and
-stays process-separated from the Python client.
+Run Zotero's `translation-server` separately. The server is AGPL and stays
+process-separated from the Python client.
 
 ## Institutional access
 
