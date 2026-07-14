@@ -1,0 +1,2 @@
+# Convenience install for source checkouts. Package metadata is authoritative.
+-e .[browser,web]

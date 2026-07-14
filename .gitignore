@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Runtime outputs (generated, not source-controlled)
+downloads/
+run_log.csv
+*.log
+failed_manual_review.html
+
+# Secrets / local overrides
+.env
+config.yaml
+*.dpapi
+access_log.jsonl
+.doi2pdf/
+doi2pdf-browser/
+playwright-profile*/
+
+# Local integration inputs retained outside the clean product repository
+.claude/
+paper-fetch-master/
+zoteor_translator/
+src/
+1_setup.bat
+2_run.bat
+3_import.bat
+scan_zotero.py
+test_fetch.py
+test_primp.pdf
+
+# Build/test outputs
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db

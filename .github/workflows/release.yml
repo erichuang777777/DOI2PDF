@@ -1,0 +1,27 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install build
+      - run: python -m build
+      - name: Package Codex skill
+        run: cd skills && zip -r ../dist/doi2pdf-skill.zip doi2pdf
+      - name: Package one-click source product
+        run: git archive --format=zip --output=dist/DOI2PDF-windows-source.zip HEAD
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --title "DOI2PDF $GITHUB_REF_NAME"
