@@ -1,5 +1,10 @@
 # Architecture
 
+The coding-agent surface is a concise skill paired with the installed `doi2pdf` CLI. The
+release skill archive embeds the matching wheel, while the HTML application remains the
+human-only setup and authentication surface. Secret values flow from HTML POST to the ignored
+local `.env` and process environment; only boolean configured state is rendered afterward.
+
 `DOI2PDF.fetch()` is the sole retrieval orchestrator. It normalizes or resolves the input,
 then walks four ordered layers and stops only when a response passes PDF magic-byte
 validation.

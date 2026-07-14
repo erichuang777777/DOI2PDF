@@ -22,8 +22,20 @@ from .pipeline import DOI2PDF
 
 app = FastAPI(title="DOI2PDF", version=__version__)
 ENV_PATH = Path(os.getenv("DOI2PDF_ENV_FILE", ".env"))
-SECRET_ENV_KEYS = {"PUBMED_API_KEY", "S2_API_KEY", "ELSEVIER_TDM_KEY", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY"}
+SECRET_ENV_KEYS = {
+    "PUBMED_API_KEY", "S2_API_KEY", "ELSEVIER_TDM_KEY", "ELSEVIER_INSTTOKEN",
+    "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
+}
 _FILES: dict[str, Path] = {}
+
+
+@app.middleware("http")
+async def prevent_settings_cache(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path in {"/setup", "/configure"}:
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 def _layout(title: str, body: str) -> str:
@@ -58,8 +70,14 @@ def _settings() -> Settings:
     return Settings.from_env()
 
 
-def _masked(value: str) -> str:
-    return "configured" if value else "not configured"
+def _secret_field(label: str, key: str, configured: bool) -> str:
+    """Render secret state, never the secret value."""
+    state = "configured — leave blank to keep" if configured else "not configured"
+    return (
+        f'<label>{html.escape(label)} <span class="muted">({state})</span></label>'
+        f'<input type="password" name="{html.escape(key, quote=True)}" value="" '
+        'autocomplete="new-password" spellcheck="false" placeholder="Enter a new key">'
+    )
 
 
 def _write_env(updates: dict[str, str]) -> None:
@@ -77,7 +95,15 @@ def _write_env(updates: dict[str, str]) -> None:
             existing[key] = value.replace("\r", "").replace("\n", "")
         if key not in order:
             order.append(key)
+    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     ENV_PATH.write_text("\n".join(f"{key}={existing[key]}" for key in order) + "\n", encoding="utf-8")
+    try:
+        ENV_PATH.chmod(0o600)
+    except OSError:
+        pass
+    # Make saved values available to the running CLI/web process immediately.
+    for key, value in existing.items():
+        os.environ[key] = value
 
 
 def _parse_body(body: bytes) -> dict[str, str]:
@@ -144,12 +170,13 @@ def setup() -> str:
 <p class="muted">Usually found in your library portal or OpenAthens Redirector link generator.</p>
 <label>EZproxy login prefix</label><input name="EZPROXY_PREFIX" value="{html.escape(settings.ezproxy_prefix, quote=True)}" placeholder="https://login.yourlibrary.edu/login?url=">
 <label>Library resolver / SFX template</label><input name="LIBRARY_RESOLVER_TEMPLATE" value="{html.escape(settings.resolver_template, quote=True)}" placeholder="https://resolver.yourlibrary.edu/openurl?doi={{doi}}"></section>
-<section class="card"><h2>3. Optional API keys</h2><p>You can skip these now. They improve rate limits or enable official publisher retrieval.</p><details><summary>Show optional keys</summary>
-<label>PubMed API key <span class="muted">({_masked(settings.pubmed_api_key)})</span></label><input type="password" name="PUBMED_API_KEY" autocomplete="off">
-<label>Semantic Scholar API key <span class="muted">({_masked(settings.semantic_scholar_api_key)})</span></label><input type="password" name="S2_API_KEY" autocomplete="off">
-<label>Elsevier TDM key <span class="muted">({_masked(settings.elsevier_api_key)})</span></label><input type="password" name="ELSEVIER_TDM_KEY" autocomplete="off">
-<label>Wiley TDM token <span class="muted">({_masked(settings.wiley_tdm_token)})</span></label><input type="password" name="WILEY_TDM_TOKEN" autocomplete="off">
-<label>Springer API key <span class="muted">({_masked(settings.springer_api_key)})</span></label><input type="password" name="SPRINGER_API_KEY" autocomplete="off"></details>
+<section class="card"><h2>3. Optional API keys</h2><p>You can skip these now. Keys are written to the local <code>.env</code>, loaded as environment variables, and never displayed back in this page.</p><details><summary>Configure optional keys</summary>
+{_secret_field("PubMed API key", "PUBMED_API_KEY", bool(settings.pubmed_api_key))}
+{_secret_field("Semantic Scholar API key", "S2_API_KEY", bool(settings.semantic_scholar_api_key))}
+{_secret_field("Elsevier TDM key", "ELSEVIER_TDM_KEY", bool(settings.elsevier_api_key))}
+{_secret_field("Elsevier institution token", "ELSEVIER_INSTTOKEN", bool(settings.elsevier_insttoken))}
+{_secret_field("Wiley TDM token", "WILEY_TDM_TOKEN", bool(settings.wiley_tdm_token))}
+{_secret_field("Springer API key", "SPRINGER_API_KEY", bool(settings.springer_api_key))}</details>
 <button type="submit">Save and start DOI2PDF</button></section></form>""")
 
 
@@ -170,7 +197,7 @@ async def save_setup(request: Request):
         return _layout("Setup problem", f'<section class="card"><h2>Please check these settings</h2><p class="bad">{problems}</p><a class="button" href="/setup">Return to setup</a></section>')
     allowed = {
         "DOI2PDF_CONTACT_EMAIL", "DOWNLOAD_DIR", "PUBMED_API_KEY", "S2_API_KEY",
-        "ELSEVIER_TDM_KEY", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
+        "ELSEVIER_TDM_KEY", "ELSEVIER_INSTTOKEN", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
         "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "LIBRARY_RESOLVER_TEMPLATE",
     }
     updates = {key: value.strip() for key, value in form.items() if key in allowed}
@@ -224,16 +251,17 @@ async def fetch(request: Request) -> str:
 def configure() -> str:
     settings = _settings()
     return _layout("Settings", f"""
-<h1>Settings</h1><p class="muted">Stored only in the ignored local <code>.env</code> file. Never enter an OpenAthens password here.</p>
+<h1>Settings</h1><p class="muted">Settings are stored in the ignored local <code>.env</code> file and loaded into DOI2PDF's environment. Saved API keys are never displayed back in this page. Never enter an OpenAthens password here.</p>
 <section class="card"><form method="post" action="/configure">
 <label>Contact email</label><input type="email" name="DOI2PDF_CONTACT_EMAIL" value="{html.escape(settings.contact_email, quote=True)}" required>
 <label>Unpaywall email</label><input type="email" name="UNPAYWALL_EMAIL" value="{html.escape(settings.unpaywall_email, quote=True)}">
 <label>Default PDF folder</label><input name="DOWNLOAD_DIR" value="{html.escape(str(settings.download_dir), quote=True)}">
-<label>PubMed API key <span class="muted">({_masked(settings.pubmed_api_key)})</span></label><input type="password" name="PUBMED_API_KEY" autocomplete="off">
-<label>Semantic Scholar API key <span class="muted">({_masked(settings.semantic_scholar_api_key)})</span></label><input type="password" name="S2_API_KEY" autocomplete="off">
-<label>Elsevier TDM key <span class="muted">({_masked(settings.elsevier_api_key)})</span></label><input type="password" name="ELSEVIER_TDM_KEY" autocomplete="off">
-<label>Wiley TDM token <span class="muted">({_masked(settings.wiley_tdm_token)})</span></label><input type="password" name="WILEY_TDM_TOKEN" autocomplete="off">
-<label>Springer API key <span class="muted">({_masked(settings.springer_api_key)})</span></label><input type="password" name="SPRINGER_API_KEY" autocomplete="off">
+{_secret_field("PubMed API key", "PUBMED_API_KEY", bool(settings.pubmed_api_key))}
+{_secret_field("Semantic Scholar API key", "S2_API_KEY", bool(settings.semantic_scholar_api_key))}
+{_secret_field("Elsevier TDM key", "ELSEVIER_TDM_KEY", bool(settings.elsevier_api_key))}
+{_secret_field("Elsevier institution token", "ELSEVIER_INSTTOKEN", bool(settings.elsevier_insttoken))}
+{_secret_field("Wiley TDM token", "WILEY_TDM_TOKEN", bool(settings.wiley_tdm_token))}
+{_secret_field("Springer API key", "SPRINGER_API_KEY", bool(settings.springer_api_key))}
 <label>OpenAthens redirector prefix</label><input name="OPENATHENS_REDIRECTOR_PREFIX" value="{html.escape(settings.openathens_redirector_prefix, quote=True)}" placeholder="https://go.openathens.net/redirector/YOUR-DOMAIN?url=">
 <label>EZproxy prefix/template</label><input name="EZPROXY_PREFIX" value="{html.escape(settings.ezproxy_prefix, quote=True)}">
 <label>Library resolver template</label><input name="LIBRARY_RESOLVER_TEMPLATE" value="{html.escape(settings.resolver_template, quote=True)}" placeholder="https://resolver.example/openurl?doi={{doi}}">
@@ -245,7 +273,7 @@ def configure() -> str:
 async def save_configuration(request: Request):
     allowed = {
         "DOI2PDF_CONTACT_EMAIL", "UNPAYWALL_EMAIL", "DOWNLOAD_DIR", "PUBMED_API_KEY", "S2_API_KEY",
-        "ELSEVIER_TDM_KEY", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
+        "ELSEVIER_TDM_KEY", "ELSEVIER_INSTTOKEN", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
         "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "LIBRARY_RESOLVER_TEMPLATE",
     }
     form = _parse_body(await request.body())

@@ -18,6 +18,23 @@ It tries, in order:
 Every downloaded response is checked for a real `%PDF-` header and written atomically.
 The JSON result records every route and its provenance.
 
+## Coding-agent skill
+
+The release asset `doi2pdf-skill.zip` is the primary coding-agent package. It contains the
+concise agent workflow, configuration reference, installer, and the matching DOI2PDF wheel.
+Extract it into the agent's skills directory, then install its CLI in the agent's Python
+environment:
+
+```powershell
+python path\to\doi2pdf\scripts\install_cli.py
+doi2pdf doctor --json
+```
+
+Use `--with-browser` on the installer only when the user needs authorized OpenAthens/EZproxy
+access. Agents call the global `doi2pdf` command and parse one JSON envelope from stdout.
+If setup is required, they launch `doi2pdf-web`; API keys are entered only in the local HTML
+page, stored in the ignored `.env`, and never rendered back to the browser or agent.
+
 ## One-click Windows app
 
 Double-click **`DOI2PDF.bat`**. On the first run it creates an isolated environment,
@@ -65,8 +82,8 @@ local Playwright profile.
 ## Usage
 
 ```powershell
-# Validate configuration
-doi2pdf doctor
+# Validate configuration (machine-readable flag works before or after the command)
+doi2pdf doctor --json
 
 # OA/TDM only
 doi2pdf --json fetch 10.1186/s12984-023-01168-x --no-institution
@@ -117,7 +134,10 @@ containing `{url}`. DOI2PDF never ships another institution's endpoints.
 
 - `0`: valid PDF obtained / command succeeded
 - `1`: command-line usage error
-- `2`: routes exhausted, configuration issue, or manual resolver required
+- `2`: invalid identifier or configuration/setup required
+- `3`: automatic routes exhausted; inspect `resolver_url` for manual completion
+- `4`: institutional login/configuration needs human action
+- `5`: unexpected runtime failure
 
 ## License
 

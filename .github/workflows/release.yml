@@ -17,8 +17,12 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install build
       - run: python -m build
-      - name: Package Codex skill
-        run: cd skills && zip -r ../dist/doi2pdf-skill.zip doi2pdf
+      - name: Package agent skill with its CLI wheel
+        run: |
+          mkdir -p build/skill/doi2pdf/assets
+          cp -r skills/doi2pdf/. build/skill/doi2pdf/
+          cp dist/doi2pdf-*.whl build/skill/doi2pdf/assets/
+          cd build/skill && zip -r ../../dist/doi2pdf-skill.zip doi2pdf
       - name: Package one-click source product
         run: git archive --format=zip --output=dist/DOI2PDF-windows-source.zip HEAD
       - name: Publish GitHub release
