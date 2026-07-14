@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi.responses import RedirectResponse
 
 from doi2pdf import web
+from doi2pdf.models import FetchResult
 
 
 def test_home_has_retrieval_form(monkeypatch):
@@ -11,7 +12,8 @@ def test_home_has_retrieval_form(monkeypatch):
     assert "Retrieve a paper" in page
     assert 'name="identifier"' in page
     assert "OpenAthens/EZproxy" in page
-    assert "Searching for a verified PDF" in page
+    assert "Starting the live tracker" in page
+    assert 'href="/activity"' in page
 
 
 def test_first_run_redirects_to_guided_setup(monkeypatch):
@@ -84,6 +86,55 @@ def test_registered_pdf_can_be_served_inline_or_downloaded(tmp_path: Path):
     assert Path(inline.path) == pdf.resolve()
     assert inline.headers["content-disposition"].startswith("inline")
     assert download.headers["content-disposition"].startswith("attachment")
+
+
+def test_background_job_tracks_progress_and_result(tmp_path: Path, monkeypatch):
+    class FakeClient:
+        def fetch(self, identifier, output, use_institution, progress):
+            progress({"percent": 20, "stage": "open_access", "message": "Checking indexes", "source": "unpaywall"})
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"%PDF-1.4\n")
+            progress({"percent": 100, "stage": "complete", "message": "Saved", "status": "pdf_saved"})
+            return FetchResult(
+                doi="10.1234/example", ok=True, path=output, route="unpaywall",
+                layer="open_access", bytes=9, sha256="abc",
+            )
+
+    monkeypatch.setattr(web, "DOI2PDF", lambda settings: FakeClient())
+    monkeypatch.setattr(web, "_settings", lambda: web.Settings(contact_email="a@example.org", setup_complete=True))
+    with web._JOB_LOCK:
+        web._JOBS.clear()
+    job_id = web._new_job("10.1234/example")
+    web._run_fetch_job(job_id, {"identifier": "10.1234/example", "output_dir": str(tmp_path)})
+    payload = json_from_response(web.job_status(job_id))
+    assert payload["state"] == "succeeded"
+    assert payload["percent"] == 100
+    assert payload["result"]["filename"].endswith(".pdf")
+    assert "path" not in payload["result"]
+    assert "Checking indexes" in str(payload["events"])
+    assert "Open PDF" in web.job_result(job_id)
+
+
+def test_activity_and_progress_pages_are_live_console_views():
+    with web._JOB_LOCK:
+        web._JOBS.clear()
+    job_id = web._new_job("10.1234/example")
+    assert "Activity monitor" in web.activity()
+    assert "Recent route events" in web.activity()
+    page = web.job_progress(job_id)
+    assert "Retrieval progress" in page
+    assert f"/api/jobs/${{jobId}}" in page
+
+
+def test_job_log_redacts_configured_secrets(monkeypatch):
+    monkeypatch.setenv("PUBMED_API_KEY", "do-not-display")
+    with web._JOB_LOCK:
+        web._JOBS.clear()
+    job_id = web._new_job("10.1234/example")
+    web._job_event(job_id, {"percent": 50, "stage": "test", "message": "failure do-not-display"})
+    payload = json_from_response(web.job_status(job_id))
+    assert "do-not-display" not in str(payload)
+    assert "[redacted]" in str(payload)
 
 
 def json_from_response(response):

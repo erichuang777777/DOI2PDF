@@ -4,6 +4,11 @@ Prefer the HTML page launched by `doi2pdf-web` for first-time configuration. It 
 to the local `.env`, loads them into the running process environment, and renders only their
 configured state afterward; it never sends a stored key back to the browser.
 
+The local console uses `/` for fetch, `/activity` for sanitized in-memory job logs,
+`/configure` for settings, `/jobs/<id>` for progress, and `/health` for machine-readable
+readiness. Progress APIs intentionally omit local paths, secret values, cookies, headers, and
+candidate URLs.
+
 ## Public metadata and OA
 
 | Variable | Purpose | Required |

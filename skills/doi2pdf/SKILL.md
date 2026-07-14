@@ -15,7 +15,9 @@ out of prompts, command arguments, logs, and responses.
    `python scripts/install_cli.py` relative to this skill directory. Add `--with-browser` only
    when institutional login is required and the user permits installing Chromium.
 2. If doctor returns `setup_required`, launch `doi2pdf-web` and direct the user to the local
-   HTML setup page. Never ask the user to paste an API key or password into chat.
+   HTML console. Use **Settings** for configuration, **Activity** for sanitized live logs, and
+   the job progress page for route-by-route monitoring. Never ask the user to paste an API key
+   or password into chat.
 3. Normalize and verify the DOI; never invent one. If only a title/PMID is available, resolve
    it through a trustworthy metadata service before fetching.
 4. Prefer `doi2pdf fetch <DOI> --no-institution --json` first. Parse the JSON
@@ -29,7 +31,9 @@ out of prompts, command arguments, logs, and responses.
    route statuses. Never expose keys, cookies, headers, or credentials.
 
 For nontechnical local use, launch `DOI2PDF.bat`. Complete `/setup` on first run, retrieve
-from the Fetch page, then use the tokenized **Open PDF** or **Download a copy** button. If the
+from the Fetch page, follow the live progress tracker, then use the tokenized **Open PDF** or
+**Download a copy** button. Use `/activity` to monitor recent jobs. Logs are in memory only,
+reset on restart, and must never include keys, cookies, request headers, or signed URLs. If the
 CLI succeeds but the website appears not to provide a file, verify the result page contains
 `/files/<token>` and check `/health`; never expose a raw user-supplied filesystem path.
 

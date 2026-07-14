@@ -35,6 +35,19 @@ access. Agents call the global `doi2pdf` command and parse one JSON envelope fro
 If setup is required, they launch `doi2pdf-web`; API keys are entered only in the local HTML
 page, stored in the ignored `.env`, and never rendered back to the browser or agent.
 
+## Local web console
+
+The local-only console provides four operational views:
+
+- **Fetch** starts a background retrieval without blocking the browser request.
+- **Progress** shows the current lawful layer, completion percentage, and sanitized route events.
+- **Activity** monitors the latest 50 jobs and updates once per second.
+- **Settings** manages environment configuration without rendering stored API-key values.
+
+Activity logs stay in memory and reset when the server restarts. They omit candidate URLs,
+request headers, cookies, local output paths, and API keys. At most two web retrieval jobs run
+concurrently; institutional requests retain their separate persistent rate limits.
+
 ## One-click Windows app
 
 Double-click **`DOI2PDF.bat`**. On the first run it creates an isolated environment,
