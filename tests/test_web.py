@@ -1,5 +1,6 @@
 from pathlib import Path
 import asyncio
+import urllib.parse
 
 from fastapi.responses import RedirectResponse
 
@@ -30,6 +31,8 @@ def test_setup_explains_required_and_optional_fields(monkeypatch):
     assert "Your contact email (required)" in page
     assert "Library access (optional)" in page
     assert "Never enter your library password" in page
+    assert "Official application instructions" in page
+    assert "dev.elsevier.com" in page
 
 
 def test_write_env_preserves_secret_when_blank(tmp_path: Path, monkeypatch):
@@ -173,6 +176,45 @@ def test_learned_rules_page_is_sanitized_and_forgettable(monkeypatch, tmp_path):
     assert "publisher.example" in page and "a.download" in page
     assert "token=secret" not in page.lower()
     assert 'action="/rules/forget"' in page
+
+
+def test_configure_has_official_api_links_and_library_assistant(monkeypatch):
+    monkeypatch.setattr(web, "_settings", lambda: web.Settings(contact_email="a@example.org", setup_complete=True))
+    page = web.configure()
+    for host in ("ncbi.nlm.nih.gov", "semanticscholar.org", "dev.elsevier.com", "onlinelibrary.wiley.com", "dev.springernature.com"):
+        assert host in page
+    assert 'action="/library-detect"' in page
+    assert "Nothing is saved until" in page
+
+
+def test_library_detect_preview_never_renders_target_url():
+    class Request:
+        async def body(self):
+            value = "https://go.openathens.net/redirector/example.edu?url=https%3A%2F%2Fpublisher.example%2Fpaper%3Ftoken%3Dsecret"
+            return urllib.parse.urlencode({"library_url": value}).encode()
+
+    page = asyncio.run(web.library_detect(Request()))
+    assert "OPENATHENS_REDIRECTOR_PREFIX" in page
+    assert "publisher.example" not in page
+    assert "token" not in page
+
+
+def test_apply_detected_library_setting_writes_only_reviewed_prefix(tmp_path, monkeypatch):
+    class Request:
+        async def body(self):
+            return urllib.parse.urlencode({
+                "field": "EZPROXY_PREFIX",
+                "value": "https://login.example.edu/login?url=",
+                "start_login": "0",
+            }).encode()
+
+    env = tmp_path / ".env"
+    monkeypatch.setattr(web, "ENV_PATH", env)
+    response = asyncio.run(web.apply_library_detection(Request()))
+    assert isinstance(response, RedirectResponse)
+    text = env.read_text(encoding="utf-8")
+    assert "EZPROXY_PREFIX=https://login.example.edu/login?url=" in text
+    assert "publisher" not in text
 
 
 def test_job_log_redacts_configured_secrets(monkeypatch):

@@ -10,6 +10,15 @@ The local console uses `/` for fetch, `/acceptance` for the real one-at-a-time t
 readiness. Progress APIs intentionally omit local paths, secret values, cookies, headers, and
 candidate URLs.
 
+Each API field in `/configure` links to the provider's official application instructions:
+
+- PubMed/NCBI: `https://www.ncbi.nlm.nih.gov/account/settings/`
+- Semantic Scholar: `https://www.semanticscholar.org/product/api`
+- Elsevier: `https://dev.elsevier.com/`
+- Wiley TDM: `https://onlinelibrary.wiley.com/library-info/resources/text-and-datamining`
+- Springer Nature: `https://dev.springernature.com/docs/quick-start/api-access/`
+- Unpaywall email policy/API: `https://unpaywall.org/products/api`
+
 ## Public metadata and OA
 
 | Variable | Purpose | Required |
@@ -80,3 +89,10 @@ process-separated from the Python client.
 Do not copy another institution's endpoint. Keep institutional passwords only in the ignored
 local environment; never render them or place them in command arguments. Do not automate
 CAPTCHA, OpenAthens/Shibboleth SSO, or MFA.
+
+If the user has a link copied from their own library portal, run `doi2pdf library-detect URL
+--json` or use **Library Access Assistant**. Accept only HTTPS. The detector discards the article
+target and returns one proposed `OPENATHENS_REDIRECTOR_PREFIX`, `EZPROXY_PREFIX`, or
+`EZPROXY_SUFFIX`; it does not write configuration from the CLI. In the web console, require the
+user to review the inferred value before applying it. Then open visible Chromium and let the user
+complete SSO/MFA; the web flow stays open temporarily without waiting for terminal input.

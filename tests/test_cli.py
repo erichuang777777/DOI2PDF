@@ -86,6 +86,13 @@ def test_rules_command_lists_and_guards_forget(capsys, monkeypatch, tmp_path):
     assert json.loads(capsys.readouterr().out)["removed"] == 1
 
 
+def test_library_detect_command_is_agent_ready(capsys):
+    assert cli.main(["library-detect", "https://login.example.edu/login?url=https://publisher.example/article", "--json"]) == cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "ezproxy_prefix"
+    assert payload["updates"]["EZPROXY_PREFIX"].endswith("url=")
+
+
 def test_skill_installer_dry_run_uses_local_project():
     script = Path("skills/doi2pdf/scripts/install_cli.py")
     completed = subprocess.run(

@@ -76,6 +76,19 @@ def test_library_login_must_be_https():
     assert "LIBRARY_LOGIN_URL must start with https://" in settings.validate()
 
 
+def test_web_login_mode_is_forwarded_without_terminal_prompt(monkeypatch):
+    browser = InstitutionalBrowser(Settings(ezproxy_prefix="https://login.example.edu/login?url="))
+    recorded = {}
+
+    def browse(url, doi, spec, login_only=False, wait_for_console=True):
+        recorded.update({"url": url, "login_only": login_only, "wait_for_console": wait_for_console})
+
+    monkeypatch.setattr(browser, "_browse", browse)
+    browser.login(wait_for_console=False)
+    assert recorded["login_only"] is True
+    assert recorded["wait_for_console"] is False
+
+
 def test_validated_learned_selector_is_reused_and_promoted(tmp_path):
     class Response:
         status = 200
