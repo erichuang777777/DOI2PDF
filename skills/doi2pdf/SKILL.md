@@ -18,6 +18,9 @@ out of prompts, command arguments, logs, and responses.
    HTML console. Use **Settings** for configuration, **Activity** for sanitized live logs, and
    the job progress page for route-by-route monitoring. Never ask the user to paste an API key
    or password into chat.
+   Use **Library Access Assistant** when the user has a library-provided link but does not know
+   its OpenAthens/EZproxy prefix. Review the inferred setting before applying it; never guess an
+   institution from the user's email or use another library's endpoint.
 3. After configuring optional API keys, run `doi2pdf api-check --json`. This performs one
    small request against each configured real API; it is not a mock and never returns key
    values. Treat `not_configured` as optional, `invalid_or_unauthorized` as a credential
@@ -82,6 +85,7 @@ doi2pdf api-check --json
 doi2pdf acceptance --json
 doi2pdf routes --json
 doi2pdf rules --json
+doi2pdf library-detect "https://login.yourlibrary.edu/login?url=https://publisher.example/article" --json
 doi2pdf holdings 10.1056/NEJMoa2404512 --json
 doi2pdf resolve "https://doi.org/10.1186/s12984-023-01168-x" --json
 doi2pdf fetch 10.1186/s12984-023-01168-x --no-institution --json

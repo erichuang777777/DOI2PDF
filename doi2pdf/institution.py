@@ -126,13 +126,13 @@ class InstitutionalBrowser:
     def access_url(self, doi: str) -> tuple[str | None, str | None]:
         return self.authorize_url(f"https://doi.org/{doi}", doi), self._family()
 
-    def login(self) -> None:
+    def login(self, wait_for_console: bool = True) -> None:
         url = self.settings.library_login_url
         if not url:
             url, _ = self.access_url("10.5555/doi2pdf-login-check")
         if not url:
             raise ValueError("Configure OPENATHENS_REDIRECTOR_PREFIX, EZPROXY_PREFIX, or EZPROXY_SUFFIX first")
-        self._browse(url, None, None, login_only=True)
+        self._browse(url, None, None, login_only=True, wait_for_console=wait_for_console)
 
     def fetch(self, doi: str) -> InstitutionResult:
         family = self._family()
@@ -404,7 +404,16 @@ class InstitutionalBrowser:
                     return match.group(1).replace("&amp;", "&")
         return None
 
-    def _browse(self, url: str, doi: str | None, spec: RouteSpec | None, login_only: bool = False):
+    @staticmethod
+    def _wait_for_web_login(page, maximum_s: int = 180) -> None:
+        """Keep the visible browser alive while a web-console user completes SSO/MFA."""
+        started = time.time()
+        while time.time() - started < maximum_s:
+            page.wait_for_timeout(2_000)
+            if page.is_closed():
+                return
+
+    def _browse(self, url: str, doi: str | None, spec: RouteSpec | None, login_only: bool = False, wait_for_console: bool = True):
         try:
             from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
             from playwright.sync_api import sync_playwright
@@ -448,8 +457,10 @@ class InstitutionalBrowser:
                                 page.wait_for_timeout(4_000)
                                 if "/login" not in page.url.lower() and password.count() == 0:
                                     return None
-                        if not headless:
+                        if not headless and wait_for_console:
                             input("Complete institutional login/SSO/MFA in Chromium, then press Enter here... ")
+                        elif not headless:
+                            self._wait_for_web_login(page)
                         return None
                     if spec and spec.kind == "lww":
                         return self._lww(page, context, captured, doi or "")

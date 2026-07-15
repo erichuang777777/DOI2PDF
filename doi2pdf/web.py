@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -21,6 +22,7 @@ from .api_probe import probe_all
 from .config import Settings
 from .naming import build_pdf_path
 from .learned_rules import RuleStore
+from .library_detect import detect_library_link
 from .pipeline import DOI2PDF
 from .publisher_routes import ROUTES
 from .route_health import summary as route_health_summary
@@ -37,6 +39,17 @@ _FILES: dict[str, Path] = {}
 _JOBS: dict[str, dict[str, Any]] = {}
 _JOB_LOCK = threading.RLock()
 MAX_ACTIVE_WEB_JOBS = 2
+_LOGIN_STATE: dict[str, Any] = {"state": "idle", "message": "No login session is running."}
+
+
+API_HELP = {
+    "pubmed": ("Optional. Create it in My NCBI account settings.", "https://www.ncbi.nlm.nih.gov/account/settings/"),
+    "semantic": ("Optional; public requests work without a key but may be throttled.", "https://www.semanticscholar.org/product/api"),
+    "elsevier": ("Register your own key; full-text entitlement still depends on your licence.", "https://dev.elsevier.com/"),
+    "wiley": ("Accept Wiley's TDM terms to receive a personal access token.", "https://onlinelibrary.wiley.com/library-info/resources/text-and-datamining"),
+    "springer": ("Register in Springer Nature API Management.", "https://dev.springernature.com/docs/quick-start/api-access/"),
+    "unpaywall": ("No key is required; Unpaywall asks for a real contact email.", "https://unpaywall.org/products/api"),
+}
 
 
 @app.middleware("http")
@@ -90,6 +103,11 @@ def _secret_field(label: str, key: str, configured: bool) -> str:
         f'<input type="password" name="{html.escape(key, quote=True)}" value="" '
         'autocomplete="new-password" spellcheck="false" placeholder="Enter a new key">'
     )
+
+
+def _application_help(provider: str, label: str = "Official application instructions") -> str:
+    description, url = API_HELP[provider]
+    return f'<p class="muted">{html.escape(description)} <a target="_blank" rel="noopener noreferrer" href="{html.escape(url, quote=True)}">{html.escape(label)}</a></p>'
 
 
 def _write_env(updates: dict[str, str]) -> None:
@@ -239,6 +257,7 @@ def setup() -> str:
 <form method="post" action="/setup">
 <section class="card"><h2>1. Essential setup</h2><p>Scholarly services require a real contact email for responsible API use. It is not used to sign into your library.</p>
 <label>Your contact email (required)</label><input type="email" name="DOI2PDF_CONTACT_EMAIL" value="{html.escape('' if settings.contact_email.lower() in {'you@example.org','your@email.com'} else settings.contact_email, quote=True)}" required placeholder="doctor@hospital.org">
+{_application_help("unpaywall", "Why Unpaywall asks for this")}
 <label>Where should PDFs be saved?</label><input name="DOWNLOAD_DIR" value="{html.escape(str(settings.download_dir), quote=True)}" placeholder="downloads"></section>
 <section class="card"><h2>2. Library access (optional)</h2><p>Open-access papers work without this section. For subscribed papers, paste the prefix supplied by your own library. Never enter your library password here.</p>
 <label>OpenAthens redirector prefix</label><input name="OPENATHENS_REDIRECTOR_PREFIX" value="{html.escape(settings.openathens_redirector_prefix, quote=True)}" placeholder="https://go.openathens.net/redirector/YOUR-DOMAIN?url=">
@@ -247,11 +266,16 @@ def setup() -> str:
 <label>Library resolver / SFX template</label><input name="LIBRARY_RESOLVER_TEMPLATE" value="{html.escape(settings.resolver_template, quote=True)}" placeholder="https://resolver.yourlibrary.edu/openurl?doi={{doi}}"></section>
 <section class="card"><h2>3. Optional API keys</h2><p>You can skip these now. Keys are written to the local <code>.env</code>, loaded as environment variables, and never displayed back in this page.</p><details><summary>Configure optional keys</summary>
 {_secret_field("PubMed API key", "PUBMED_API_KEY", bool(settings.pubmed_api_key))}
+{_application_help("pubmed")}
 {_secret_field("Semantic Scholar API key", "S2_API_KEY", bool(settings.semantic_scholar_api_key))}
+{_application_help("semantic")}
 {_secret_field("Elsevier TDM key", "ELSEVIER_TDM_KEY", bool(settings.elsevier_api_key))}
+{_application_help("elsevier")}
 {_secret_field("Elsevier institution token", "ELSEVIER_INSTTOKEN", bool(settings.elsevier_insttoken))}
 {_secret_field("Wiley TDM token", "WILEY_TDM_TOKEN", bool(settings.wiley_tdm_token))}
-{_secret_field("Springer API key", "SPRINGER_API_KEY", bool(settings.springer_api_key))}</details>
+{_application_help("wiley")}
+{_secret_field("Springer API key", "SPRINGER_API_KEY", bool(settings.springer_api_key))}
+{_application_help("springer")}</details>
 <button type="submit">Save and start DOI2PDF</button></section></form>""")
 
 
@@ -317,6 +341,22 @@ def _run_fetch_job(job_id: str, form: dict[str, str]) -> None:
             job = _JOBS[job_id]
             job.update({"state": "failed", "percent": 100, "stage": "failed", "message": "Retrieval failed", "error": message, "updated_at": time.time()})
         _job_event(job_id, {"percent": 100, "stage": "failed", "message": "Retrieval failed", "status": type(exc).__name__}, state="failed")
+
+
+def _run_login_job() -> None:
+    _LOGIN_STATE.update({"state": "running", "message": "Visible Chromium is waiting for your SSO/MFA."})
+    try:
+        DOI2PDF(_settings()).institution.login(wait_for_console=False)
+        _LOGIN_STATE.update({"state": "complete", "message": "The browser session was saved to the private profile."})
+    except Exception as exc:
+        _LOGIN_STATE.update({"state": "failed", "message": _redact(f"{type(exc).__name__}: {exc}")})
+
+
+def _start_login_job() -> bool:
+    if _LOGIN_STATE.get("state") == "running":
+        return False
+    threading.Thread(target=_run_login_job, daemon=True, name="doi2pdf-library-login").start()
+    return True
 
 
 @app.post("/fetch", response_class=HTMLResponse)
@@ -469,13 +509,19 @@ def configure() -> str:
 <section class="card"><form method="post" action="/configure">
 <label>Contact email</label><input type="email" name="DOI2PDF_CONTACT_EMAIL" value="{html.escape(settings.contact_email, quote=True)}" required>
 <label>Unpaywall email</label><input type="email" name="UNPAYWALL_EMAIL" value="{html.escape(settings.unpaywall_email, quote=True)}">
+{_application_help("unpaywall")}
 <label>Default PDF folder</label><input name="DOWNLOAD_DIR" value="{html.escape(str(settings.download_dir), quote=True)}">
 {_secret_field("PubMed API key", "PUBMED_API_KEY", bool(settings.pubmed_api_key))}
+{_application_help("pubmed")}
 {_secret_field("Semantic Scholar API key", "S2_API_KEY", bool(settings.semantic_scholar_api_key))}
+{_application_help("semantic")}
 {_secret_field("Elsevier TDM key", "ELSEVIER_TDM_KEY", bool(settings.elsevier_api_key))}
+{_application_help("elsevier")}
 {_secret_field("Elsevier institution token", "ELSEVIER_INSTTOKEN", bool(settings.elsevier_insttoken))}
 {_secret_field("Wiley TDM token", "WILEY_TDM_TOKEN", bool(settings.wiley_tdm_token))}
+{_application_help("wiley")}
 {_secret_field("Springer API key", "SPRINGER_API_KEY", bool(settings.springer_api_key))}
+{_application_help("springer")}
 <details><summary>Optional LLM-assisted PDF link ranking</summary><p class="muted">The LLM receives only publisher hostname, candidate text, ARIA labels, and URL paths without query strings. It never receives cookies, credentials, signed URLs, or full page HTML.</p>
 <input type="hidden" name="DOI2PDF_LLM_ENABLED" value="false"><label class="check"><input type="checkbox" name="DOI2PDF_LLM_ENABLED" value="true" {"checked" if settings.llm_enabled else ""}> Enable LLM candidate ranking</label>
 <label>OpenAI-compatible base URL</label><input name="DOI2PDF_LLM_BASE_URL" value="{html.escape(settings.llm_base_url, quote=True)}" placeholder="https://provider.example/v1 or http://127.0.0.1:11434/v1">
@@ -496,7 +542,10 @@ def configure() -> str:
 <label>paper-radar SQLite path</label><input name="PAPER_RADAR_DB" value="{html.escape(str(settings.paper_radar_db or ''), quote=True)}" placeholder="C:\\path\\papers.sqlite">
 <button type="submit">Save settings</button></form></section>
 <section class="card"><h2>API connectivity</h2><p>Send one small real request to each configured provider. Results show only provider, status, and HTTP code; keys are never returned.</p><form method="post" action="/api-check"><button class="secondary" type="submit">Test configured API keys</button></form></section>
-<section class="card"><h2>Institutional session</h2><p>After saving your own OpenAthens or EZproxy prefix, open the persistent Chromium login. Complete SSO/MFA in Chromium, then return to the DOI2PDF launcher window and press Enter.</p><form method="post" action="/institution-login"><button class="secondary" type="submit">Open institutional login</button></form></section>""")
+<section class="card"><h2>Library Access Assistant</h2><p>Copy one database, journal, or full-text link from your own library portal. DOI2PDF can recognize common OpenAthens redirector and EZproxy formats without opening the target or saving its article URL.</p>
+<form method="post" action="/library-detect"><label>Library-provided link</label><input type="url" name="library_url" required autocomplete="off" spellcheck="false" placeholder="https://go.openathens.net/redirector/your-institution?url=...">
+<button class="secondary" type="submit">Detect access settings</button></form><p class="muted">Nothing is saved until you review and apply the detected prefix or suffix.</p></section>
+<section class="card"><h2>Institutional session</h2><p>Open visible Chromium and complete SSO/MFA yourself. The web request returns immediately while the browser remains available for up to three minutes; there is no terminal prompt.</p><p>Status: <strong>{html.escape(str(_LOGIN_STATE.get("state", "idle")))}</strong> — {html.escape(str(_LOGIN_STATE.get("message", "")))}</p><form method="post" action="/institution-login"><button class="secondary" type="submit">Open institutional login</button></form></section>""")
 
 
 @app.post("/configure")
@@ -548,14 +597,40 @@ async def api_check() -> str:
     return _layout("API check", f'<h1>API connectivity check</h1><section class="card"><table><thead><tr><th>Provider</th><th>Configured</th><th>Result</th><th>HTTP</th></tr></thead><tbody>{rows}</tbody></table><p class="muted">A publisher key can be accepted even when this account or network is not entitled to the selected article.</p><a class="button" href="/configure">Back to settings</a></section>')
 
 
-@app.post("/institution-login", response_class=HTMLResponse)
-async def institution_login() -> str:
-    client = DOI2PDF(_settings())
+@app.post("/library-detect", response_class=HTMLResponse)
+async def library_detect(request: Request) -> str:
+    value = _parse_body(await request.body()).get("library_url", "")
     try:
-        await run_in_threadpool(client.institution.login)
-    except Exception as exc:
-        return _layout("Login error", f'<section class="card"><p class="bad">{html.escape(type(exc).__name__ + ": " + str(exc))}</p><a class="button" href="/configure">Back to settings</a></section>')
-    return _layout("Login ready", '<section class="card"><p class="ok">The persistent institutional browser session is ready.</p><a class="button" href="/">Retrieve a paper</a></section>')
+        detection = detect_library_link(value)
+    except ValueError as exc:
+        return _layout("Library link not recognized", f'<section class="card"><h2>Could not recognize this link</h2><p class="bad">{html.escape(str(exc))}</p><p>No settings were changed.</p><a class="button" href="/configure">Try another link</a></section>')
+    field, inferred = next(iter(detection["updates"].items()))
+    return _layout("Library access detected", f'<h1>Review detected access</h1><section class="card"><p class="ok">Detected: {html.escape(detection["label"])}</p><p><strong>Source host:</strong> {html.escape(detection["host"])}</p><p><strong>Setting:</strong> <code>{html.escape(field)}</code></p><p><strong>Inferred value:</strong> <code>{html.escape(inferred)}</code></p><p class="muted">{html.escape(detection["warning"])}</p><form method="post" action="/library-detect/apply"><input type="hidden" name="field" value="{html.escape(field, quote=True)}"><input type="hidden" name="value" value="{html.escape(inferred, quote=True)}"><button type="submit" name="start_login" value="0">Apply setting</button> <button class="secondary" type="submit" name="start_login" value="1">Apply and open login</button></form><a class="button secondary" href="/configure">Cancel</a></section>')
+
+
+@app.post("/library-detect/apply", response_class=HTMLResponse)
+async def apply_library_detection(request: Request):
+    form = _parse_body(await request.body())
+    field, value = form.get("field", ""), form.get("value", "").strip()
+    valid = False
+    if field in {"OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX"}:
+        valid = value.startswith("https://") and value.lower().endswith("url=")
+    elif field == "EZPROXY_SUFFIX":
+        valid = bool(re.fullmatch(r"[A-Za-z0-9.-]+(?::\d+)?", value))
+    if not valid:
+        raise HTTPException(status_code=400, detail="The detected library setting is invalid.")
+    _write_env({field: value})
+    if form.get("start_login") == "1":
+        _start_login_job()
+        return _layout("Library login opened", '<section class="card"><p class="ok">The setting was saved and visible Chromium is opening.</p><p>Complete your institution\'s SSO/MFA in that browser. DOI2PDF will keep it open for up to three minutes and save the session automatically.</p><a class="button" href="/configure">Return to settings</a></section>')
+    return RedirectResponse("/configure?library_detected=1", status_code=303)
+
+
+@app.post("/institution-login", response_class=HTMLResponse)
+def institution_login() -> str:
+    started = _start_login_job()
+    message = "Visible Chromium is opening. Complete SSO/MFA there; no terminal input is needed." if started else "A library login browser is already running."
+    return _layout("Login browser", f'<section class="card"><p class="ok">{html.escape(message)}</p><p>The session remains open for up to three minutes and is stored only in the private browser profile.</p><a class="button" href="/configure">Back to settings</a></section>')
 
 
 @app.get("/health")
@@ -569,6 +644,7 @@ def health() -> JSONResponse:
         "ok": not settings.needs_setup(), "version": __version__, "issues": settings.validate(),
         "setup_complete": not settings.needs_setup(),
         "jobs": {"active": active_jobs, "recent": recent_jobs},
+        "library_login": {"state": _LOGIN_STATE.get("state", "idle"), "message": _redact(_LOGIN_STATE.get("message", ""))},
         "routes": {
             "unpaywall": bool(settings.unpaywall_email),
             "zotero_translation_server": settings.translator_enabled,

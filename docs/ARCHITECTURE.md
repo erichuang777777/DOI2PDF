@@ -63,3 +63,10 @@ On first launch, the web application requires a real API contact email and recor
 completion in the ignored `.env`. Retrieved files are exposed to the browser only through
 random in-memory tokens; clients cannot request arbitrary filesystem paths. Tokens expire
 when the local server stops.
+
+The Library Access Assistant performs syntax-only detection on a user-pasted HTTPS link. It
+recognizes OpenAthens redirectors, EZproxy starting-point URLs, and common proxy-by-hostname
+suffixes, discards the article target, and asks for confirmation before saving one inferred
+setting. It never fetches the pasted target or attempts institution discovery from an email.
+Web-initiated login runs in a background thread with visible Chromium for up to three minutes,
+so SSO/MFA remains human-controlled without blocking on terminal input.

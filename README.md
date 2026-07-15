@@ -54,6 +54,9 @@ The local-only console provides five operational views:
 - **Acceptance** offers 5–10 real publisher papers for deliberate, one-at-a-time tests with
   the user's own institutional access; it never launches a bulk run.
 - **Settings** manages environment configuration without rendering stored API-key values.
+- Every supported API field links directly to its official registration or access instructions.
+- **Library Access Assistant** infers OpenAthens/EZproxy settings from one link copied from the
+  user's own library portal, then opens visible login without a terminal prompt.
 - **Routes** displays all 23 publisher prefixes and sanitized local success/failure counts.
 - **Learned rules** shows publisher selectors learned only after a validated PDF download and
   lets the user forget a host without exposing signed URLs or session data.
@@ -122,6 +125,7 @@ doi2pdf acceptance --publisher Elsevier --json
 # Inspect the full publisher registry and sanitized route-health scorecard
 doi2pdf routes --json
 doi2pdf rules --json
+doi2pdf library-detect "https://login.yourlibrary.edu/login?url=https://publisher.example/article" --json
 
 # Check article coverage or list subscribed platforms from HOLDINGS_DB
 doi2pdf holdings 10.1056/NEJMoa2404512 --json
@@ -212,6 +216,12 @@ https://go.openathens.net/redirector/YOUR-DOMAIN?url=
 Set it as `OPENATHENS_REDIRECTOR_PREFIX`, run `doi2pdf login`, and complete SSO/MFA in the
 visible Chromium window. For EZproxy, set your own library's login prefix or a template
 containing `{url}`. DOI2PDF never ships another institution's endpoints.
+
+If you do not know the prefix, open **Library Access Assistant** in Settings and paste one
+database or full-text link copied from your own library portal. It recognizes common
+OpenAthens/EZproxy formats, removes the article target, and shows the inferred setting for
+approval. **Apply and open login** launches visible Chromium in the background for up to three
+minutes, so the web console does not require a terminal prompt. SSO/MFA/CAPTCHA remain manual.
 
 Set `EZPROXY_SUFFIX` when your library uses rewritten publisher hosts such as
 `onlinelibrary-wiley-com.<your suffix>`; this enables the original publisher-specific route

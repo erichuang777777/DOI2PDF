@@ -14,6 +14,7 @@ from .batch_journal import attempted_keys, successful_entries as successful_log_
 from .config import Settings
 from .holdings import Holdings
 from .learned_rules import RuleStore
+from .library_detect import detect_library_link
 from .naming import build_pdf_path
 from .pipeline import DOI2PDF
 from .publisher_routes import ROUTES
@@ -91,6 +92,8 @@ def build_parser() -> argparse.ArgumentParser:
     rules.add_argument("--host", help="Filter rules by publisher hostname")
     rules.add_argument("--forget", metavar="HOST", help="Forget every learned selector for one hostname")
     rules.add_argument("--yes", action="store_true", help="Required non-interactive confirmation with --forget")
+    library_detect = sub.add_parser("library-detect", help="Infer OpenAthens/EZproxy settings from a library-provided link")
+    library_detect.add_argument("url")
     review = sub.add_parser("manual-review", help="Create a local HTML review page for latest batch failures")
     review.add_argument("--log", type=Path, help="Override the profile-local batch journal path")
     review.add_argument("--output", type=Path, default=Path("failed_manual_review.html"))
@@ -173,6 +176,16 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_INPUT_OR_CONFIG
         payload = {"schema": 1, "ok": True, "command": "rules", "status": "ready", "count": len(rows), "rules": rows}
         _emit(args, payload, "\n".join(f"{row['host']} {row['status']} {row['selector']}" for row in rows) or "No learned rules.")
+        return EXIT_OK
+    if args.command == "library-detect":
+        try:
+            detection = detect_library_link(args.url)
+        except ValueError as exc:
+            payload = {"schema": 1, "ok": False, "command": "library-detect", "status": "not_recognized", "error": str(exc)}
+            _emit(args, payload, payload["error"], error=True)
+            return EXIT_INPUT_OR_CONFIG
+        payload = {"schema": 1, "ok": True, "command": "library-detect", "status": "detected", **detection}
+        _emit(args, payload, f"Detected {detection['label']}: {json.dumps(detection['updates'])}")
         return EXIT_OK
     if args.command == "manual-review":
         log_path = args.log or settings.browser_profile / "batch_log.jsonl"
