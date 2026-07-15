@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 
-RELEASE = "v0.7.0"
+# A movable tag lets a retagged release silently change the installed code.
+# Set DOI2PDF_INSTALL_REF to a commit SHA to pin the git fallback immutably.
+RELEASE = os.getenv("DOI2PDF_INSTALL_REF", "v0.7.0")
 REPOSITORY = "https://github.com/erichuang777777/DOI2PDF.git"
 
 
