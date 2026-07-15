@@ -12,6 +12,8 @@ from urllib.parse import quote, urljoin, urlsplit
 from .config import Settings
 from .holdings import Holdings
 from .http import looks_like_pdf
+from .learned_rules import RuleStore
+from .llm_ranker import rank as llm_rank
 from .publisher_routes import (
     RouteSpec, citation_pdf_url, lww_article_details, lww_signed_pdf_url,
     ovid_viewer_pdf_url, proxy_host, rewrite_for_proxy, route_for, template_url,
@@ -96,6 +98,7 @@ class InstitutionalBrowser:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.holdings = Holdings(settings)
+        self.rules = RuleStore(settings.browser_profile / "learned_pdf_rules.json")
 
     @property
     def log_path(self) -> Path:
@@ -208,28 +211,108 @@ class InstitutionalBrowser:
             time.sleep(3)
         return None, "not_pdf"
 
+    @staticmethod
+    def _link_candidates(page) -> list[dict]:
+        return page.eval_on_selector_all(
+            'a[href],button,[role="button"]',
+            """elements => elements.slice(0, 40).map((element, id) => {
+              const stable = (el) => {
+                if (el.id) return '#' + CSS.escape(el.id);
+                for (const name of ['data-testid', 'data-test', 'aria-label']) {
+                  const value = el.getAttribute(name);
+                  if (value && value.length < 100) return `${el.tagName.toLowerCase()}[${name}="${CSS.escape(value)}"]`;
+                }
+                const classes = [...el.classList].filter(x => /^[A-Za-z_][A-Za-z0-9_-]*$/.test(x)).slice(0, 2);
+                if (classes.length) return el.tagName.toLowerCase() + classes.map(x => '.' + CSS.escape(x)).join('');
+                const parts = [];
+                for (let node = el; node && node.nodeType === 1 && parts.length < 5; node = node.parentElement) {
+                  let part = node.tagName.toLowerCase();
+                  const siblings = node.parentElement ? [...node.parentElement.children].filter(x => x.tagName === node.tagName) : [];
+                  if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
+                  parts.unshift(part);
+                }
+                return parts.join(' > ');
+              };
+              return {id, text:(element.innerText || element.textContent || '').trim(),
+                aria:element.getAttribute('aria-label') || '', href:element.href || element.getAttribute('data-href') || '',
+                selector:stable(element)};
+            })""",
+        )
+
+    def _try_selector(self, page, context, captured: list[bytes], selector: str) -> tuple[bytes | None, str]:
+        locator = page.locator(selector).first
+        if not locator.count():
+            return None, "selector_missing"
+        href = locator.get_attribute("href") or locator.get_attribute("data-href")
+        if href:
+            target = urljoin(page.url, href)
+            if self.settings.ezproxy_suffix:
+                target = rewrite_for_proxy(target, self.settings.ezproxy_suffix)
+            content, status = self._request_pdf(context, target, page.url)
+            if content:
+                return content, status
+        else:
+            try:
+                locator.click(timeout=10_000)
+                page.wait_for_timeout(3_000)
+                if captured:
+                    return captured[0], "pdf"
+            except Exception:
+                return None, "selector_click_failed"
+        return None, "selector_not_pdf"
+
     def _generic_or_meta(self, page, context, captured: list[bytes], doi: str, spec: RouteSpec | None) -> tuple[bytes | None, str]:
         page.wait_for_timeout(4_000)
         if captured:
             return captured[0], "pdf"
+        host = (urlsplit(page.url).hostname or "").lower()
+        suffix = self.settings.ezproxy_suffix.lower().lstrip(".")
+        # Do not retain or send the institution-specific proxy hostname. Reverse
+        # the configured proxy transformation to the publisher hostname.
+        if suffix and host.endswith("." + suffix):
+            host = host[: -(len(suffix) + 1)].replace("-", ".")
+        if spec and spec.host:
+            host = spec.host
+        for rule in (row for row in self.rules.list(host) if row.get("enabled", True)):
+            try:
+                content, status = self._try_selector(page, context, captured, rule["selector"])
+            except Exception:
+                content, status = None, "selector_failed"
+            if content:
+                self.rules.remember(host, rule["selector"], text_hint=rule.get("text_hint", ""), source="learned")
+                return content, "pdf_learned_rule"
+            self.rules.failed(host, rule["selector"])
         document = page.content()
         pdf_url = citation_pdf_url(document)
-        if not pdf_url:
-            links = page.locator('a[href$=".pdf"],a[href*="/pdf/"],a[href*="/pdfdirect/"],a:has-text("Download PDF"),a:has-text("View PDF")')
-            ranked: list[tuple[int, str]] = []
-            for index in range(min(links.count(), 20)):
-                link = links.nth(index)
-                href = link.get_attribute("href")
-                if href:
-                    low = href.lower()
-                    if not any(term in low for term in ("supplement", "citation", "metrics")):
-                        ranked.append(((5 if re.search(r"\.pdf(?:$|[?#])", low) else 0) + (3 if "pdf" in (link.inner_text() or "").lower() else 0), urljoin(page.url, href)))
-            pdf_url = max(ranked)[1] if ranked else None
-        if not pdf_url:
-            return None, "no_citation_pdf_url" if spec and spec.kind == "meta" else "no_pdf_link"
-        if self.settings.ezproxy_suffix:
-            pdf_url = rewrite_for_proxy(pdf_url, self.settings.ezproxy_suffix)
-        return self._request_pdf(context, pdf_url, page.url)
+        if pdf_url:
+            if self.settings.ezproxy_suffix:
+                pdf_url = rewrite_for_proxy(pdf_url, self.settings.ezproxy_suffix)
+            return self._request_pdf(context, pdf_url, page.url)
+        candidates = self._link_candidates(page)
+        useful = []
+        for item in candidates:
+            low = f"{item.get('text', '')} {item.get('aria', '')} {item.get('href', '')}".lower()
+            if any(term in low for term in ("supplement", "citation", "metrics", "figure", "dataset")):
+                continue
+            score = (5 if re.search(r"\.pdf(?:$|[?#])", str(item.get("href", "")).lower()) else 0) + (3 if "pdf" in low else 0) + (2 if "download" in low else 0)
+            if score:
+                useful.append({**item, "score": score})
+        selected_id = None
+        try:
+            selected_id = llm_rank(self.settings, host, useful)
+        except Exception as exc:
+            self._log({"kind": "llm_rank", "status": f"{type(exc).__name__}"})
+        useful.sort(key=lambda item: (item["id"] != selected_id, -item["score"]))
+        for item in useful[:3]:
+            try:
+                content, status = self._try_selector(page, context, captured, item["selector"])
+            except Exception:
+                content, status = None, "selector_failed"
+            if content:
+                source = "llm" if item["id"] == selected_id else "deterministic"
+                self.rules.remember(host, item["selector"], text_hint=item.get("text", ""), source=source)
+                return content, "pdf_llm_ranked" if source == "llm" else "pdf_link_scored"
+        return None, "no_citation_pdf_url" if spec and spec.kind == "meta" else "no_pdf_link"
 
     def _lww(self, page, context, captured: list[bytes], doi: str) -> tuple[bytes | None, str]:
         page.wait_for_timeout(4_000)

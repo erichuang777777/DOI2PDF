@@ -43,6 +43,15 @@ def probe_all(settings: Settings, provider: str | None = None) -> list[dict[str,
     timeout = max(5, min(30, settings.request_timeout_s))
     user_agent = {"User-Agent": f"DOI2PDF credential check (mailto:{settings.contact_email})"}
     checks: dict[str, tuple[bool, Callable[[], Any], bool]] = {
+        "llm": (
+            bool(settings.llm_enabled and settings.llm_base_url and settings.llm_model),
+            lambda: requests.post(
+                settings.llm_base_url.rstrip("/") + ("" if settings.llm_base_url.rstrip("/").endswith("/chat/completions") else "/chat/completions"),
+                headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {settings.llm_api_key}"} if settings.llm_api_key else {})},
+                json={"model": settings.llm_model, "max_tokens": 1, "messages": [{"role": "user", "content": "Reply OK"}]},
+                timeout=timeout, stream=True,
+            ), False,
+        ),
         "pubmed": (
             bool(settings.pubmed_api_key),
             lambda: requests.get(

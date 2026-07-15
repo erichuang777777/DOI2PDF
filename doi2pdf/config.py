@@ -4,6 +4,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -39,6 +40,10 @@ class Settings:
     resolver_template: str = ""
     paper_radar_db: Path | None = None
     holdings_db: Path | None = None
+    llm_enabled: bool = False
+    llm_base_url: str = ""
+    llm_model: str = ""
+    llm_api_key: str = ""
     download_dir: Path = field(default_factory=lambda: Path("downloads"))
     setup_complete: bool = False
     browser_profile: Path = field(default_factory=lambda: Path.home() / ".doi2pdf" / "browser")
@@ -79,6 +84,10 @@ class Settings:
             resolver_template=os.getenv("LIBRARY_RESOLVER_TEMPLATE", ""),
             paper_radar_db=Path(value) if (value := os.getenv("PAPER_RADAR_DB", "")) else None,
             holdings_db=Path(value) if (value := os.getenv("HOLDINGS_DB", "")) else None,
+            llm_enabled=_bool("DOI2PDF_LLM_ENABLED", False),
+            llm_base_url=os.getenv("DOI2PDF_LLM_BASE_URL", "").rstrip("/"),
+            llm_model=os.getenv("DOI2PDF_LLM_MODEL", ""),
+            llm_api_key=os.getenv("DOI2PDF_LLM_API_KEY", ""),
             download_dir=Path(os.getenv("DOWNLOAD_DIR", "downloads")),
             setup_complete=_bool("DOI2PDF_SETUP_COMPLETE", False),
             browser_profile=Path(os.getenv("DOI2PDF_BROWSER_PROFILE", str(Path.home() / ".doi2pdf" / "browser"))),
@@ -118,6 +127,15 @@ class Settings:
             issues.append("LIBRARY_USERNAME and LIBRARY_PASSWORD must be configured together.")
         if self.resolver_template and "{doi}" not in self.resolver_template:
             issues.append("LIBRARY_RESOLVER_TEMPLATE must contain {doi}.")
+        if self.llm_enabled:
+            if not self.llm_base_url or not self.llm_model:
+                issues.append("LLM-assisted discovery requires DOI2PDF_LLM_BASE_URL and DOI2PDF_LLM_MODEL.")
+            elif not (self.llm_base_url.startswith("https://") or re.match(r"^http://(?:127\.0\.0\.1|localhost)(?::\d+)?(?:/|$)", self.llm_base_url)):
+                issues.append("DOI2PDF_LLM_BASE_URL must use HTTPS or a loopback HTTP endpoint.")
+            else:
+                parts = urlsplit(self.llm_base_url)
+                if parts.username or parts.password or parts.query or parts.fragment:
+                    issues.append("DOI2PDF_LLM_BASE_URL cannot contain credentials, query strings, or fragments.")
         return issues
 
     def needs_setup(self) -> bool:

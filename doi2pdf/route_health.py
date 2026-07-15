@@ -33,6 +33,7 @@ def summary(path: Path) -> dict[str, Any]:
     for prefix, spec in sorted(ROUTES.items()):
         rows = [event for event in routes if event.get("prefix") == prefix]
         counts = Counter(event.get("status", "unknown") for event in rows)
-        scorecard.append({"prefix": prefix, "kind": spec.kind, "label": spec.label, "pdf": counts["pdf"], "failures": sum(counts.values()) - counts["pdf"], "statuses": dict(counts)})
+        pdf = sum(count for status, count in counts.items() if str(status).startswith("pdf"))
+        scorecard.append({"prefix": prefix, "kind": spec.kind, "label": spec.label, "pdf": pdf, "failures": sum(counts.values()) - pdf, "statuses": dict(counts)})
     gaps = sorted({event["prefix"] for event in routes if event.get("subscribed") is True and event.get("prefix") not in ROUTES})
     return {"events": len(events), "route_events": len(routes), "statuses": dict(statuses), "blocks": blocks, "routes": scorecard, "subscribed_route_gaps": gaps}

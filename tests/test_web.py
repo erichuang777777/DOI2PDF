@@ -56,6 +56,10 @@ def test_settings_pages_never_render_stored_api_keys(monkeypatch):
         "springer_api_key": "springer-secret",
         "library_password": "library-secret",
         "library_username": "library-user",
+        "llm_api_key": "llm-secret",
+        "llm_enabled": True,
+        "llm_base_url": "https://llm.example/v1",
+        "llm_model": "ranker",
     }
     monkeypatch.setattr(
         web,
@@ -63,11 +67,13 @@ def test_settings_pages_never_render_stored_api_keys(monkeypatch):
         lambda: web.Settings(contact_email="a@example.org", setup_complete=True, **secrets),
     )
     pages = web.setup() + web.configure()
-    for secret in secrets.values():
-        assert secret not in pages
+    for key, secret in secrets.items():
+        if key.endswith("api_key") or key in {"elsevier_insttoken", "wiley_tdm_token", "library_password", "library_username"}:
+            assert secret not in pages
     assert 'name="PUBMED_API_KEY" value=""' in pages
     assert 'name="LIBRARY_PASSWORD" value=""' in pages
     assert 'name="LIBRARY_USERNAME" value=""' in pages
+    assert 'name="DOI2PDF_LLM_API_KEY" value=""' in pages
     assert "configured — leave blank to keep" in pages
 
 
@@ -158,6 +164,15 @@ def test_routes_page_contains_full_registry_and_sanitized_health(monkeypatch, tm
     assert page.count("<code>10.") == 23
     assert "lww_ovid" in page
     assert "secret" not in page
+
+
+def test_learned_rules_page_is_sanitized_and_forgettable(monkeypatch, tmp_path):
+    monkeypatch.setattr(web, "_settings", lambda: web.Settings(browser_profile=tmp_path))
+    web.RuleStore(tmp_path / "learned_pdf_rules.json").remember("publisher.example", "a.download", text_hint="Download PDF", source="llm")
+    page = web.learned_rules_page()
+    assert "publisher.example" in page and "a.download" in page
+    assert "token=secret" not in page.lower()
+    assert 'action="/rules/forget"' in page
 
 
 def test_job_log_redacts_configured_secrets(monkeypatch):

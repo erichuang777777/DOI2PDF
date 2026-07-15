@@ -13,6 +13,7 @@ from .batch_journal import append as append_batch_log
 from .batch_journal import attempted_keys, successful_entries as successful_log_entries, write_manual_review
 from .config import Settings
 from .holdings import Holdings
+from .learned_rules import RuleStore
 from .naming import build_pdf_path
 from .pipeline import DOI2PDF
 from .publisher_routes import ROUTES
@@ -81,11 +82,15 @@ def build_parser() -> argparse.ArgumentParser:
     acceptance = sub.add_parser("acceptance", help="List real papers for one-at-a-time access testing")
     acceptance.add_argument("--publisher", help="Filter by publisher name")
     api_check = sub.add_parser("api-check", help="Test configured API credentials against real endpoints")
-    api_check.add_argument("--provider", choices=("pubmed", "semantic_scholar", "elsevier", "wiley", "springer"))
+    api_check.add_argument("--provider", choices=("llm", "pubmed", "semantic_scholar", "elsevier", "wiley", "springer"))
     holdings = sub.add_parser("holdings", help="Check DOI entitlement against a read-only local holdings database")
     holdings.add_argument("identifier", nargs="?")
     holdings.add_argument("--platforms", action="store_true", help="List subscribed platforms")
     sub.add_parser("routes", help="Show publisher route registry and sanitized route-health counts")
+    rules = sub.add_parser("rules", help="List or forget sanitized learned publisher selectors")
+    rules.add_argument("--host", help="Filter rules by publisher hostname")
+    rules.add_argument("--forget", metavar="HOST", help="Forget every learned selector for one hostname")
+    rules.add_argument("--yes", action="store_true", help="Required non-interactive confirmation with --forget")
     review = sub.add_parser("manual-review", help="Create a local HTML review page for latest batch failures")
     review.add_argument("--log", type=Path, help="Override the profile-local batch journal path")
     review.add_argument("--output", type=Path, default=Path("failed_manual_review.html"))
@@ -144,6 +149,31 @@ def main(argv: list[str] | None = None) -> int:
         payload = {"schema": 1, "ok": True, "command": "routes", "status": "ready", "registry": registry, "health": health}
         _emit(args, payload, "\n".join(f"{row['prefix']} {row['kind']} {row['label']}" for row in registry))
         return EXIT_OK
+    if args.command == "rules":
+        store = RuleStore(settings.browser_profile / "learned_pdf_rules.json")
+        if args.forget:
+            if not args.yes:
+                payload = {"schema": 1, "ok": False, "command": "rules", "status": "confirmation_required", "error": "Re-run with --forget HOST --yes."}
+                _emit(args, payload, payload["error"], error=True)
+                return EXIT_INPUT_OR_CONFIG
+            try:
+                removed = store.forget(args.forget)
+            except ValueError as exc:
+                payload = {"schema": 1, "ok": False, "command": "rules", "status": "invalid_host", "error": str(exc)}
+                _emit(args, payload, payload["error"], error=True)
+                return EXIT_INPUT_OR_CONFIG
+            payload = {"schema": 1, "ok": True, "command": "rules", "status": "forgotten", "host": args.forget.lower(), "removed": removed}
+            _emit(args, payload, f"Forgot {removed} rule(s) for {args.forget.lower()}.")
+            return EXIT_OK
+        try:
+            rows = store.list(args.host)
+        except ValueError as exc:
+            payload = {"schema": 1, "ok": False, "command": "rules", "status": "invalid_host", "error": str(exc)}
+            _emit(args, payload, payload["error"], error=True)
+            return EXIT_INPUT_OR_CONFIG
+        payload = {"schema": 1, "ok": True, "command": "rules", "status": "ready", "count": len(rows), "rules": rows}
+        _emit(args, payload, "\n".join(f"{row['host']} {row['status']} {row['selector']}" for row in rows) or "No learned rules.")
+        return EXIT_OK
     if args.command == "manual-review":
         log_path = args.log or settings.browser_profile / "batch_log.jsonl"
         count = write_manual_review(log_path, args.output, settings.resolver_template)
@@ -177,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
                 "resolver": bool(settings.resolver_template),
                 "publisher_route_count": len(ROUTES),
                 "holdings": bool(settings.holdings_db and settings.holdings_db.is_file()),
+                "llm_assisted_discovery": settings.llm_enabled,
             },
         }
         _emit(args, payload, "configuration OK" if payload["ok"] else "\n".join(issues or ["Run doi2pdf-web to finish setup."]), error=not payload["ok"])
