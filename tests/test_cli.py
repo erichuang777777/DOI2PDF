@@ -58,6 +58,21 @@ def test_api_check_without_keys_is_explicit_and_does_not_call_network(capsys, mo
     assert {row["status"] for row in payload["results"]} == {"not_configured"}
 
 
+def test_routes_command_exposes_complete_registry_without_secrets(capsys, monkeypatch, tmp_path):
+    monkeypatch.setattr(cli.Settings, "from_env", lambda: Settings(browser_profile=tmp_path, library_password="secret"))
+    assert cli.main(["routes", "--json"]) == cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["registry"]) == 23
+    assert "secret" not in str(payload)
+
+
+def test_holdings_command_explains_missing_database(capsys, monkeypatch):
+    monkeypatch.setattr(cli.Settings, "from_env", lambda: Settings())
+    assert cli.main(["holdings", "10.1234/example", "--json"]) == cli.EXIT_INPUT_OR_CONFIG
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "not_configured"
+
+
 def test_skill_installer_dry_run_uses_local_project():
     script = Path("skills/doi2pdf/scripts/install_cli.py")
     completed = subprocess.run(

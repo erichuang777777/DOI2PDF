@@ -2,16 +2,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 import time
 from pathlib import Path
 
 from .acceptance import corpus
 from .api_probe import probe_all
+from .batch_journal import append as append_batch_log
+from .batch_journal import attempted_keys, successful_entries as successful_log_entries, write_manual_review
 from .config import Settings
+from .holdings import Holdings
 from .naming import build_pdf_path
 from .pipeline import DOI2PDF
+from .publisher_routes import ROUTES
+from .route_health import summary as health_summary
 from .zotero import ZoteroLibrary, find_zotero_db
+from .zotero_attach import attach_linked_pdfs, successful_csv_entries
 
 
 EXIT_OK = 0
@@ -57,12 +64,31 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--output-dir", type=Path, default=Path("downloads"))
     batch.add_argument("--limit", type=int)
     batch.add_argument("--no-institution", action="store_true")
+    batch.add_argument("--resume", action="store_true", help="Skip items already recorded in the sanitized batch journal")
+    batch.add_argument("--retry-failed", action="store_true", help="With --resume, retry prior failures and skip successes only")
+    batch.add_argument("--log", type=Path, help="Override the profile-local batch journal path")
+    attach = sub.add_parser("zotero-attach", help="Dry-run or write linked PDF attachments into Zotero")
+    attach.add_argument("--db", type=Path)
+    source = attach.add_mutually_exclusive_group(required=True)
+    source.add_argument("--csv", type=Path, help="Import successful entries from a DOI2PDF/legacy run CSV")
+    source.add_argument("--file", type=Path, help="One validated PDF to attach")
+    source.add_argument("--log", type=Path, help="Import successful entries from a DOI2PDF JSONL batch journal")
+    attach.add_argument("--item-key", help="Zotero parent item key (required with --file)")
+    attach.add_argument("--write", action="store_true", help="Write after making a timestamped database backup")
+    attach.add_argument("--yes", action="store_true", help="Required non-interactive confirmation with --write")
     sub.add_parser("login", help="Open the configured institutional login in persistent Chromium")
     sub.add_parser("doctor", help="Check configuration")
     acceptance = sub.add_parser("acceptance", help="List real papers for one-at-a-time access testing")
     acceptance.add_argument("--publisher", help="Filter by publisher name")
     api_check = sub.add_parser("api-check", help="Test configured API credentials against real endpoints")
     api_check.add_argument("--provider", choices=("pubmed", "semantic_scholar", "elsevier", "wiley", "springer"))
+    holdings = sub.add_parser("holdings", help="Check DOI entitlement against a read-only local holdings database")
+    holdings.add_argument("identifier", nargs="?")
+    holdings.add_argument("--platforms", action="store_true", help="List subscribed platforms")
+    sub.add_parser("routes", help="Show publisher route registry and sanitized route-health counts")
+    review = sub.add_parser("manual-review", help="Create a local HTML review page for latest batch failures")
+    review.add_argument("--log", type=Path, help="Override the profile-local batch journal path")
+    review.add_argument("--output", type=Path, default=Path("failed_manual_review.html"))
     return parser
 
 
@@ -87,6 +113,43 @@ def main(argv: list[str] | None = None) -> int:
         human = "\n".join(f"{row['provider']}: {row['status']}" for row in results)
         _emit(args, payload, human, error=not ok)
         return EXIT_OK if ok else EXIT_INPUT_OR_CONFIG
+    if args.command == "holdings":
+        checker = Holdings(settings)
+        if not checker.configured:
+            payload = {"schema": 1, "ok": False, "command": "holdings", "status": "not_configured", "error": "Set HOLDINGS_DB to a readable SQLite database."}
+            _emit(args, payload, payload["error"], error=True)
+            return EXIT_INPUT_OR_CONFIG
+        if args.platforms:
+            rows = checker.platforms()
+            payload = {"schema": 1, "ok": True, "command": "holdings", "status": "ready", "platforms": rows}
+            _emit(args, payload, "\n".join(f"{row['platform']}: {row['journals']}" for row in rows))
+            return EXIT_OK
+        if not args.identifier:
+            payload = {"schema": 1, "ok": False, "command": "holdings", "status": "invalid_identifier", "error": "Provide a DOI or use --platforms."}
+            _emit(args, payload, payload["error"], error=True)
+            return EXIT_INPUT_OR_CONFIG
+        try:
+            doi = app.identifiers.resolve(args.identifier)
+            entitlement = checker.check(doi)
+        except (ValueError, OSError, RuntimeError) as exc:
+            payload = {"schema": 1, "ok": False, "command": "holdings", "status": "check_failed", "error": f"{type(exc).__name__}: {exc}"}
+            _emit(args, payload, payload["error"], error=True)
+            return EXIT_RUNTIME_ERROR
+        payload = {"schema": 1, "ok": True, "command": "holdings", "status": "known" if entitlement.get("subscribed") is not None else "unknown", "doi": doi, "entitlement": entitlement}
+        _emit(args, payload, json.dumps(entitlement, ensure_ascii=False))
+        return EXIT_OK
+    if args.command == "routes":
+        health = health_summary(settings.browser_profile / "access_log.jsonl")
+        registry = [{"prefix": prefix, "kind": spec.kind, "label": spec.label, "headful": spec.headful} for prefix, spec in sorted(ROUTES.items())]
+        payload = {"schema": 1, "ok": True, "command": "routes", "status": "ready", "registry": registry, "health": health}
+        _emit(args, payload, "\n".join(f"{row['prefix']} {row['kind']} {row['label']}" for row in registry))
+        return EXIT_OK
+    if args.command == "manual-review":
+        log_path = args.log or settings.browser_profile / "batch_log.jsonl"
+        count = write_manual_review(log_path, args.output, settings.resolver_template)
+        payload = {"schema": 1, "ok": True, "command": "manual-review", "status": "complete", "count": count, "output": str(args.output.resolve()), "log": str(log_path.resolve())}
+        _emit(args, payload, f"Manual review page written: {args.output.resolve()} ({count} item(s))")
+        return EXIT_OK
     if args.command == "resolve":
         try:
             doi = app.identifiers.resolve(args.identifier)
@@ -110,8 +173,10 @@ def main(argv: list[str] | None = None) -> int:
             "routes": {
                 "open_access": bool(settings.unpaywall_email),
                 "publisher_tdm": bool(settings.elsevier_api_key or settings.wiley_tdm_token or settings.springer_api_key),
-                "institution": bool(settings.openathens_redirector_prefix or settings.ezproxy_prefix),
+                "institution": bool(settings.openathens_redirector_prefix or settings.ezproxy_prefix or settings.ezproxy_suffix),
                 "resolver": bool(settings.resolver_template),
+                "publisher_route_count": len(ROUTES),
+                "holdings": bool(settings.holdings_db and settings.holdings_db.is_file()),
             },
         }
         _emit(args, payload, "configuration OK" if payload["ok"] else "\n".join(issues or ["Run doi2pdf-web to finish setup."]), error=not payload["ok"])
@@ -125,6 +190,42 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_LOGIN_REQUIRED
         _emit(args, {"schema": 1, "ok": True, "command": "login", "status": "session_ready"}, "Institutional session ready.")
         return EXIT_OK
+    if args.command == "zotero-attach":
+        db = args.db or find_zotero_db()
+        if not db or not db.is_file():
+            payload = {"schema": 1, "ok": False, "command": "zotero-attach", "status": "zotero_database_missing", "error": "Zotero database not found; pass --db PATH."}
+            _emit(args, payload, payload["error"], error=True)
+            return EXIT_INPUT_OR_CONFIG
+        if args.file and not args.item_key:
+            payload = {"schema": 1, "ok": False, "command": "zotero-attach", "status": "item_key_required", "error": "--item-key is required with --file."}
+            _emit(args, payload, payload["error"], error=True)
+            return EXIT_INPUT_OR_CONFIG
+        if args.write and not args.yes:
+            payload = {"schema": 1, "ok": False, "command": "zotero-attach", "status": "confirmation_required", "error": "Re-run with --write --yes after closing Zotero. Dry-run is the default."}
+            _emit(args, payload, payload["error"], error=True)
+            return EXIT_INPUT_OR_CONFIG
+        try:
+            if args.csv:
+                entries = successful_csv_entries(args.csv)
+                for entry in entries:
+                    source_path = Path(entry["filepath"]).expanduser()
+                    if not source_path.is_absolute():
+                        entry["filepath"] = str((args.csv.parent / source_path).resolve())
+            elif args.log:
+                entries = successful_log_entries(args.log)
+            else:
+                entries = [{"key": args.item_key, "filepath": str(args.file)}]
+            result = attach_linked_pdfs(db, entries, write=args.write)
+        except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
+            payload = {"schema": 1, "ok": False, "command": "zotero-attach", "status": "attach_failed", "error": f"{type(exc).__name__}: {exc}"}
+            _emit(args, payload, payload["error"], error=True)
+            return EXIT_RUNTIME_ERROR
+        bad = [row for row in result["results"] if row["status"] in {"missing_or_not_pdf", "item_not_found"}]
+        status = "dry_run" if not args.write else ("partial_failure" if bad else "complete")
+        payload = {"schema": 1, "ok": not bad, "command": "zotero-attach", "status": status, **result}
+        human = f"Zotero attachment {status}: {len(result['results'])} item(s); backup={result['backup'] or 'not created'}"
+        _emit(args, payload, human, error=bool(bad))
+        return EXIT_OK if not bad else EXIT_RUNTIME_ERROR
     if args.command == "batch-zotero":
         db = args.db or find_zotero_db()
         if not db or not db.exists():
@@ -132,7 +233,13 @@ def main(argv: list[str] | None = None) -> int:
             _emit(args, payload, payload["error"], error=True)
             return EXIT_INPUT_OR_CONFIG
         outcomes = []
+        log_path = args.log or settings.browser_profile / "batch_log.jsonl"
+        already_tried = attempted_keys(log_path, retry_failed=args.retry_failed) if args.resume else set()
+        skipped = 0
         for item in ZoteroLibrary(db).missing_pdfs(args.limit):
+            if item["key"] in already_tried:
+                skipped += 1
+                continue
             target = build_pdf_path(
                 args.output_dir, zotero_key=item["key"], author=item["author"],
                 year=item["year"], title=item["title"], doi=item["doi"],
@@ -140,15 +247,17 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 result = app.fetch(item["doi"] or item["title"] or "", target, not args.no_institution)
                 outcomes.append(result.to_dict())
+                append_batch_log(log_path, {"item_key": item["key"], "doi": result.doi, "title": item["title"], "status": "success" if result.ok else "no_pdf", "route": result.route, "path": result.path})
             except Exception as exc:
                 outcomes.append({"schema": 1, "ok": False, "doi": item["doi"], "path": None,
                                  "item_key": item["key"], "error": f"{type(exc).__name__}: {exc}"})
+                append_batch_log(log_path, {"item_key": item["key"], "doi": item["doi"], "title": item["title"], "status": "error", "error_type": type(exc).__name__})
             # Public APIs also deserve a light courtesy pause; the institutional path
             # applies its stronger persistent limiter independently.
             time.sleep(1)
         succeeded = sum(bool(row.get("ok")) for row in outcomes)
         failed = sum(not bool(row.get("ok")) for row in outcomes)
-        summary = {"ok": failed == 0, "succeeded": succeeded, "failed": failed, "results": outcomes}
+        summary = {"ok": failed == 0, "succeeded": succeeded, "failed": failed, "skipped": skipped, "log": str(log_path.resolve()), "results": outcomes}
         summary.update({"schema": 1, "command": "batch-zotero", "status": "complete" if not summary["failed"] else "partial_failure"})
         _emit(args, summary, f"Zotero batch complete: {summary['succeeded']} succeeded, {summary['failed']} failed", error=bool(summary["failed"]))
         return EXIT_OK if not summary["failed"] else EXIT_NO_PDF

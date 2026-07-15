@@ -16,6 +16,11 @@ failed_manual_review.html
 config.yaml
 *.dpapi
 access_log.jsonl
+batch_log.jsonl
+holdings.sqlite
+paper-radar.sqlite
+doi_metadata_cache.json
+.ovid_e3_until
 .doi2pdf/
 doi2pdf-browser/
 playwright-profile*/

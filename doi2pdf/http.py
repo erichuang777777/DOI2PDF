@@ -27,6 +27,11 @@ class HttpClient:
         response.raise_for_status()
         return response.json()
 
+    def get_content(self, url: str, **kwargs) -> bytes:
+        response = self.session.get(url, timeout=self.timeout, **kwargs)
+        response.raise_for_status()
+        return response.content
+
     def fetch_pdf(self, url: str, referer: str | None = None) -> tuple[bytes | None, str]:
         headers = {"Accept": "application/pdf,*/*;q=0.8"}
         if referer:

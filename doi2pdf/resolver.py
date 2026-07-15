@@ -38,7 +38,7 @@ class IdentifierResolver:
             params["email"] = self.settings.contact_email
         if self.settings.pubmed_api_key:
             params["api_key"] = self.settings.pubmed_api_key
-        data = self.http.get_json("https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/", params=params)
+        data = self.http.get_json("https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/", params=params)
         for record in data.get("records") or []:
             if record.get("doi"):
                 return normalize_doi(record["doi"])

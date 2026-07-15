@@ -5,4 +5,4 @@ from .models import FetchResult
 from .pipeline import DOI2PDF
 
 __all__ = ["DOI2PDF", "FetchResult", "Settings"]
-__version__ = "0.4.0"
+__version__ = "0.5.0"

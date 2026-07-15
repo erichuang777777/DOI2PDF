@@ -29,6 +29,18 @@ The browser profile has a cross-process lock, a hard minimum 15-second courtesy 
 and a maximum of 100 institutional attempts per local day. Its access log contains only
 timestamps, request kind, and DOI—not credentials or cookies.
 
+Institutional dispatch uses the complete paper-fetch prefix registry. `tpl` routes construct
+authorized publisher PDF URLs; `meta` routes resolve the article and follow
+`citation_pdf_url`; selected metadata routes force visible navigation; `lww` routes walk the
+viewer-to-signed-PDF chain and fall back to Ovid OCE with a 30-minute E3 licence-seat
+cooldown. All paths retain magic-byte validation and emit sanitized status classifications.
+
+The optional holdings subsystem retrieves ISSN, journal, and year from Crossref, then reads
+the user's SQLite journal table in read-only mode. Its result accompanies the institutional
+attempt but an unknown or out-of-coverage result does not silently block retrieval. The
+route-health subsystem aggregates only local status fields and never exposes signed URLs,
+headers, cookies, or credentials.
+
 The local web interface is a loopback-only wrapper around the same package. It has no
 separate retrieval logic, so CLI, web, Zotero batch, and agent-skill behavior share the same
 validation and safety invariants.

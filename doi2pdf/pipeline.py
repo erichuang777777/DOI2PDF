@@ -86,12 +86,13 @@ class DOI2PDF:
         if use_institution:
             self._emit(progress, 82, "institution", "Checking the authorized institutional session")
             try:
-                content, family = self.institution.fetch(doi)
-                result.attempts.append(Attempt(family, "institution", None, "pdf" if content else "no_pdf"))
-                self._emit(progress, 92, "institution", "Institutional route checked", source=family, status="pdf" if content else "no_pdf")
-                if content:
-                    self._success(result, output, content, family, "institution")
-                    self._emit(progress, 100, "complete", "Verified institutional PDF saved", source=family, status="pdf_saved")
+                institution = self.institution.fetch(doi)
+                result.metadata["entitlement"] = institution.entitlement
+                result.attempts.append(Attempt(institution.route, "institution", None, institution.status))
+                self._emit(progress, 92, "institution", "Institutional route checked", source=institution.route, status=institution.status)
+                if institution.content:
+                    self._success(result, output, institution.content, institution.route, "institution")
+                    self._emit(progress, 100, "complete", "Verified institutional PDF saved", source=institution.route, status="pdf_saved")
                     return self._finish(result, started)
             except ProfileBusy as exc:
                 result.attempts.append(Attempt("institution", "institution", None, "busy", str(exc)))

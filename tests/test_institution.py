@@ -13,6 +13,7 @@ from doi2pdf.institution import (
     institution_daily_count,
     profile_lock,
 )
+from doi2pdf.publisher_routes import route_for
 
 
 def test_openathens_target_is_percent_encoded():
@@ -22,6 +23,13 @@ def test_openathens_target_is_percent_encoded():
     url, family = browser.access_url("10.1002/test")
     assert family == "openathens"
     assert url.endswith("https%3A%2F%2Fdoi.org%2F10.1002%2Ftest")
+
+
+def test_ezproxy_suffix_enables_original_publisher_routes():
+    browser = InstitutionalBrowser(Settings(ezproxy_suffix="proxy.example.edu"))
+    assert browser._route_entry_url("10.1056/NEJMoa1", route_for("10.1056/NEJMoa1")) == "https://www-nejm-org.proxy.example.edu/doi/pdf/10.1056/NEJMoa1"
+    meta = route_for("10.3174/ajnr.1")
+    assert browser._route_entry_url("10.3174/ajnr.1", meta) == "https://www-ajnr-org.proxy.example.edu/lookup/doi/10.3174/ajnr.1"
 
 
 def test_profile_lock_is_exclusive_and_recovers_stale_holder(tmp_path: Path):
@@ -61,3 +69,8 @@ def test_placeholder_email_requires_first_run_setup():
     settings = Settings(contact_email="you@example.org", setup_complete=True)
     assert settings.needs_setup()
     assert "real contact email" in settings.validate()[0]
+
+
+def test_library_login_must_be_https():
+    settings = Settings(contact_email="a@example.org", library_login_url="http://login.example.org")
+    assert "LIBRARY_LOGIN_URL must start with https://" in settings.validate()

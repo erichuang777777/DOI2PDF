@@ -54,6 +54,8 @@ def test_settings_pages_never_render_stored_api_keys(monkeypatch):
         "elsevier_insttoken": "elsevier-inst-secret",
         "wiley_tdm_token": "wiley-secret",
         "springer_api_key": "springer-secret",
+        "library_password": "library-secret",
+        "library_username": "library-user",
     }
     monkeypatch.setattr(
         web,
@@ -64,6 +66,8 @@ def test_settings_pages_never_render_stored_api_keys(monkeypatch):
     for secret in secrets.values():
         assert secret not in pages
     assert 'name="PUBMED_API_KEY" value=""' in pages
+    assert 'name="LIBRARY_PASSWORD" value=""' in pages
+    assert 'name="LIBRARY_USERNAME" value=""' in pages
     assert "configured — leave blank to keep" in pages
 
 
@@ -146,6 +150,14 @@ def test_api_check_page_never_displays_key(monkeypatch):
     page = asyncio.run(web.api_check())
     assert "key_accepted" in page
     assert "top-secret" not in page
+
+
+def test_routes_page_contains_full_registry_and_sanitized_health(monkeypatch, tmp_path):
+    monkeypatch.setattr(web, "_settings", lambda: web.Settings(browser_profile=tmp_path, library_password="secret"))
+    page = web.routes_page()
+    assert page.count("<code>10.") == 23
+    assert "lww_ovid" in page
+    assert "secret" not in page
 
 
 def test_job_log_redacts_configured_secrets(monkeypatch):

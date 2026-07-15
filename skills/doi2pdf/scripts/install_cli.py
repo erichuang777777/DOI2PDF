@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 
-RELEASE = "v0.4.0"
+RELEASE = "v0.5.0"
 REPOSITORY = "https://github.com/erichuang777777/DOI2PDF.git"
 
 
