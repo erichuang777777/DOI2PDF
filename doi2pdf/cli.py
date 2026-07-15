@@ -6,6 +6,8 @@ import sys
 import time
 from pathlib import Path
 
+from .acceptance import corpus
+from .api_probe import probe_all
 from .config import Settings
 from .naming import build_pdf_path
 from .pipeline import DOI2PDF
@@ -57,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--no-institution", action="store_true")
     sub.add_parser("login", help="Open the configured institutional login in persistent Chromium")
     sub.add_parser("doctor", help="Check configuration")
+    acceptance = sub.add_parser("acceptance", help="List real papers for one-at-a-time access testing")
+    acceptance.add_argument("--publisher", help="Filter by publisher name")
+    api_check = sub.add_parser("api-check", help="Test configured API credentials against real endpoints")
+    api_check.add_argument("--provider", choices=("pubmed", "semantic_scholar", "elsevier", "wiley", "springer"))
     return parser
 
 
@@ -64,6 +70,23 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(_json_argv(argv))
     settings = Settings.from_env()
     app = DOI2PDF(settings)
+    if args.command == "acceptance":
+        cases = corpus(args.publisher)
+        payload = {
+            "schema": 1, "ok": True, "command": "acceptance", "status": "ready",
+            "checked_without_access": "2026-07-15", "count": len(cases), "cases": cases,
+        }
+        _emit(args, payload, "\n".join(f"{row['publisher']}: {row['doi']} - {row['title']}" for row in cases))
+        return EXIT_OK
+    if args.command == "api-check":
+        results = probe_all(settings, args.provider)
+        configured = [row for row in results if row["configured"]]
+        ok = bool(configured) and all(row["ok"] for row in configured)
+        status = "ok" if ok else ("no_keys_configured" if not configured else "check_failed")
+        payload = {"schema": 1, "ok": ok, "command": "api-check", "status": status, "results": results}
+        human = "\n".join(f"{row['provider']}: {row['status']}" for row in results)
+        _emit(args, payload, human, error=not ok)
+        return EXIT_OK if ok else EXIT_INPUT_OR_CONFIG
     if args.command == "resolve":
         try:
             doi = app.identifiers.resolve(args.identifier)

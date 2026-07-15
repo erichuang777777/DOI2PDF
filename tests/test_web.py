@@ -1,4 +1,5 @@
 from pathlib import Path
+import asyncio
 
 from fastapi.responses import RedirectResponse
 
@@ -124,6 +125,27 @@ def test_activity_and_progress_pages_are_live_console_views():
     page = web.job_progress(job_id)
     assert "Retrieval progress" in page
     assert f"/api/jobs/${{jobId}}" in page
+
+
+def test_acceptance_page_offers_only_one_at_a_time_tests(monkeypatch):
+    monkeypatch.setattr(web, "_settings", lambda: web.Settings(download_dir=Path("papers")))
+    page = web.acceptance()
+    assert page.count("Try with my access") == 7
+    assert 'name="use_institution" value="1"' in page
+    assert "bulk test" in page
+    assert "10.1056/NEJMoa2404512" in page
+
+
+def test_api_check_page_never_displays_key(monkeypatch):
+    monkeypatch.setattr(web, "_settings", lambda: web.Settings(pubmed_api_key="top-secret"))
+    monkeypatch.setattr(
+        web,
+        "probe_all",
+        lambda settings: [{"provider": "pubmed", "configured": True, "ok": True, "status": "key_accepted", "http_status": 200}],
+    )
+    page = asyncio.run(web.api_check())
+    assert "key_accepted" in page
+    assert "top-secret" not in page
 
 
 def test_job_log_redacts_configured_secrets(monkeypatch):

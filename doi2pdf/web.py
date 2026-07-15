@@ -16,6 +16,8 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from . import __version__
+from .acceptance import corpus
+from .api_probe import probe_all
 from .config import Settings
 from .naming import build_pdf_path
 from .pipeline import DOI2PDF
@@ -62,7 +64,7 @@ details{{margin-top:16px}} select{{width:100%;padding:11px;border:1px solid #aeb
 #working{{display:none;position:fixed;inset:0;background:#f6f8faf2;z-index:9;align-items:center;justify-content:center;text-align:center;padding:20px}} #working.show{{display:flex}} .spinner{{width:48px;height:48px;border:5px solid #dbe7f0;border-top-color:var(--blue);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 18px}} @keyframes spin{{to{{transform:rotate(360deg)}}}}
 .progress-track{{height:16px;background:#e1e8ee;border-radius:999px;overflow:hidden}} .progress-bar{{height:100%;width:0;background:var(--blue);transition:width .35s ease}}
 .log{{list-style:none;padding:0;margin:0;max-height:360px;overflow:auto}} .log li{{padding:9px 0;border-bottom:1px solid var(--line);font-family:ui-monospace,Consolas,monospace;font-size:.86rem}} .pill{{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--pale);font-size:.78rem}}
-</style></head><body><main><nav><a href="/">Fetch</a><a href="/activity">Activity</a><a href="/configure">Settings</a><a href="/health">Health</a></nav>{body}</main></body></html>"""
+</style></head><body><main><nav><a href="/">Fetch</a><a href="/acceptance">Acceptance</a><a href="/activity">Activity</a><a href="/configure">Settings</a><a href="/health">Health</a></nav>{body}</main></body></html>"""
 
 
 def _settings() -> Settings:
@@ -398,6 +400,23 @@ async function poll(){{const response=await fetch('/api/jobs',{{cache:'no-store'
 </script>""")
 
 
+@app.get("/acceptance", response_class=HTMLResponse)
+def acceptance() -> str:
+    settings = _settings()
+    rows = "".join(
+        f'<tr><td>{html.escape(item["publisher"])}</td><td><code>{html.escape(item["doi"])}</code>'
+        f'<br>{html.escape(item["title"])}<br><a target="_blank" rel="noopener" href="{html.escape(item["source_url"], quote=True)}">Publisher/source page</a></td><td>{html.escape(item["access_class"])}</td>'
+        f'<td><form method="post" action="/fetch"><input type="hidden" name="identifier" value="{html.escape(item["doi"], quote=True)}">'
+        f'<input type="hidden" name="output_dir" value="{html.escape(str(settings.download_dir), quote=True)}">'
+        '<input type="hidden" name="use_institution" value="1"><button type="submit">Try with my access</button></form></td></tr>'
+        for item in corpus()
+    )
+    return _layout("Acceptance", f"""
+<h1>Live acceptance set</h1><p class="muted">These are real publisher records that DOI2PDF did not retrieve from this machine without subscription access on 15 July 2026. Run them one at a time after signing in to your own institution. This is deliberately not a bulk test.</p>
+<section class="card"><table><thead><tr><th>Source</th><th>Paper</th><th>Why included</th><th>Test</th></tr></thead><tbody>{rows}</tbody></table></section>
+<section class="card"><p><strong>Interpretation:</strong> subscription cases test your authorized OpenAthens/EZproxy route. OA discovery-gap cases test whether metadata or publisher routes need improvement; they are not evidence of a paywall.</p></section>""")
+
+
 @app.get("/configure", response_class=HTMLResponse)
 def configure() -> str:
     settings = _settings()
@@ -417,6 +436,7 @@ def configure() -> str:
 <label>EZproxy prefix/template</label><input name="EZPROXY_PREFIX" value="{html.escape(settings.ezproxy_prefix, quote=True)}">
 <label>Library resolver template</label><input name="LIBRARY_RESOLVER_TEMPLATE" value="{html.escape(settings.resolver_template, quote=True)}" placeholder="https://resolver.example/openurl?doi={{doi}}">
 <button type="submit">Save settings</button></form></section>
+<section class="card"><h2>API connectivity</h2><p>Send one small real request to each configured provider. Results show only provider, status, and HTTP code; keys are never returned.</p><form method="post" action="/api-check"><button class="secondary" type="submit">Test configured API keys</button></form></section>
 <section class="card"><h2>Institutional session</h2><p>After saving your own OpenAthens or EZproxy prefix, open the persistent Chromium login. Complete SSO/MFA in Chromium, then return to the DOI2PDF launcher window and press Enter.</p><form method="post" action="/institution-login"><button class="secondary" type="submit">Open institutional login</button></form></section>""")
 
 
@@ -443,6 +463,17 @@ async def save_configuration(request: Request):
     updates["DOI2PDF_SETUP_COMPLETE"] = "true"
     _write_env(updates)
     return RedirectResponse("/configure?saved=1", status_code=303)
+
+
+@app.post("/api-check", response_class=HTMLResponse)
+async def api_check() -> str:
+    results = await run_in_threadpool(probe_all, _settings())
+    rows = "".join(
+        f'<tr><td>{html.escape(row["provider"])}</td><td>{"yes" if row["configured"] else "no"}</td>'
+        f'<td class="{"ok" if row["ok"] else "bad"}">{html.escape(row["status"])}</td>'
+        f'<td>{html.escape(str(row.get("http_status", "-")))}</td></tr>' for row in results
+    )
+    return _layout("API check", f'<h1>API connectivity check</h1><section class="card"><table><thead><tr><th>Provider</th><th>Configured</th><th>Result</th><th>HTTP</th></tr></thead><tbody>{rows}</tbody></table><p class="muted">A publisher key can be accepted even when this account or network is not entitled to the selected article.</p><a class="button" href="/configure">Back to settings</a></section>')
 
 
 @app.post("/institution-login", response_class=HTMLResponse)

@@ -16,7 +16,7 @@ class TDMResolver:
 
     def _get(self, url: str, headers: dict[str, str]) -> tuple[bytes | None, str]:
         try:
-            response = requests.get(url, headers=headers, timeout=max(90, self.settings.request_timeout_s))
+            response = requests.get(url, headers=headers, timeout=max(5, self.settings.request_timeout_s))
         except requests.RequestException as exc:
             return None, f"request_error:{exc.__class__.__name__}"
         if response.status_code != 200:
