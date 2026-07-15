@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import os
+import socket
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -17,6 +19,64 @@ def looks_like_pdf(content: bytes) -> bool:
     return len(content) >= 1024 and content[:1024].lstrip().startswith(PDF_MAGIC)
 
 
+def _is_public_ip(ip: str) -> bool:
+    addr = ipaddress.ip_address(ip)
+    return not (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_multicast or addr.is_unspecified)
+
+
+class _PublicHostOnlyAdapter(HTTPAdapter):
+    """Refuses to connect to a host that resolves to a private/loopback/internal
+    address.
+
+    Candidate and redirect-target URLs originate from external OA indexes
+    (Unpaywall, OpenAlex, ...); a compromised or malicious index could otherwise
+    redirect a fetch to an internal address. This check runs on every hop (the
+    adapter is invoked again for each redirect), not just the initial request.
+    """
+
+    def send(self, request, **kwargs):
+        host = urlsplit(request.url).hostname
+        if host:
+            try:
+                addresses = {info[4][0] for info in socket.getaddrinfo(host, None)}
+            except socket.gaierror as exc:
+                raise requests.exceptions.ConnectionError(f"could not resolve host: {host}") from exc
+            if not addresses or not all(_is_public_ip(ip) for ip in addresses):
+                raise requests.exceptions.ConnectionError(f"refusing to connect to a non-public host: {host}")
+        return super().send(request, **kwargs)
+
+
+def build_retry_session(
+    max_retries: int = 3,
+    block_private_hosts: bool = True,
+    session: requests.Session | None = None,
+) -> requests.Session:
+    """Mount a retrying (and, by default, SSRF-guarded) adapter on a session.
+
+    `block_private_hosts=False` is for targets that are intentionally local by
+    design and user-configured, not attacker-influenced — e.g. the Zotero
+    translation-server, which the README explicitly directs users to run on
+    loopback. That's the same carve-out `Settings.validate()` already makes for
+    a loopback LLM ranking endpoint.
+    """
+    session = session or requests.Session()
+    # HttpClient (and everything built on this helper) only ever performs GETs,
+    # so retries are always idempotent.
+    retry = Retry(
+        total=max(0, max_retries),
+        backoff_factor=0.5,
+        backoff_max=8,
+        status_forcelist=(429, 500, 502, 503, 504) if max_retries > 0 else None,
+        allowed_methods=frozenset({"GET"}),
+        respect_retry_after_header=True,
+    )
+    adapter_cls = _PublicHostOnlyAdapter if block_private_hosts else HTTPAdapter
+    adapter = adapter_cls(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
 class HttpClient:
     def __init__(
         self,
@@ -24,26 +84,14 @@ class HttpClient:
         timeout: int = 45,
         session: requests.Session | None = None,
         max_retries: int = 3,
+        block_private_hosts: bool = True,
     ):
         self.timeout = timeout
-        self.session = session or requests.Session()
+        # Transient 5xx/timeouts previously made a whole layer fail immediately
+        # and fall through to the next one, needlessly lowering the success rate.
+        self.session = build_retry_session(max_retries, block_private_hosts, session=session)
         suffix = f" (mailto:{contact})" if contact else ""
         self.session.headers.update({"User-Agent": f"DOI2PDF/0.1{suffix}"})
-        if max_retries > 0:
-            # Transient 5xx/timeouts previously made a whole layer fail immediately
-            # and fall through to the next one, needlessly lowering the success rate.
-            # HttpClient only ever performs GETs, so retries are always idempotent.
-            retry = Retry(
-                total=max_retries,
-                backoff_factor=0.5,
-                backoff_max=8,
-                status_forcelist=(429, 500, 502, 503, 504),
-                allowed_methods=frozenset({"GET"}),
-                respect_retry_after_header=True,
-            )
-            adapter = HTTPAdapter(max_retries=retry)
-            self.session.mount("https://", adapter)
-            self.session.mount("http://", adapter)
 
     def get_json(self, url: str, **kwargs):
         response = self.session.get(url, timeout=self.timeout, **kwargs)

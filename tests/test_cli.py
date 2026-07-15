@@ -93,6 +93,104 @@ def test_library_detect_command_is_agent_ready(capsys):
     assert payload["updates"]["EZPROXY_PREFIX"].endswith("url=")
 
 
+def test_batch_zotero_prefetches_openalex_before_the_loop(tmp_path, monkeypatch):
+    from doi2pdf.models import FetchResult
+
+    db = tmp_path / "zotero.sqlite"
+    db.touch()
+    items = [
+        {"key": "AAA1AAA1", "title": "One", "doi": "10.1/one", "year": "2020", "author": "Smith"},
+        {"key": "BBB2BBB2", "title": "Two", "doi": "10.1/two", "year": "2021", "author": "Jones"},
+        {"key": "CCC3CCC3", "title": "Three", "doi": None, "year": None, "author": None},
+    ]
+
+    class FakeZoteroLibrary:
+        def __init__(self, path):
+            pass
+
+        def missing_pdfs(self, limit):
+            return items
+
+    prefetch_calls = []
+
+    class FakeOA:
+        def prefetch_openalex_batch(self, dois):
+            prefetch_calls.append(list(dois))
+
+    class FakeApp:
+        def __init__(self, settings):
+            self.oa = FakeOA()
+
+        def fetch(self, identifier, output, use_institution):
+            return FetchResult(doi=identifier or "unknown", ok=False, path=output)
+
+    monkeypatch.setattr(cli, "ZoteroLibrary", FakeZoteroLibrary)
+    monkeypatch.setattr(cli, "DOI2PDF", FakeApp)
+    monkeypatch.setattr(
+        cli.Settings,
+        "from_env",
+        lambda: Settings(contact_email="agent@example.org", unpaywall_email="agent@example.org"),
+    )
+
+    cli.main([
+        "--json", "batch-zotero", "--db", str(db),
+        "--output-dir", str(tmp_path / "out"), "--log", str(tmp_path / "log.jsonl"),
+    ])
+
+    # Only items with a DOI are worth prefetching; order matches the scan order.
+    assert prefetch_calls == [["10.1/one", "10.1/two"]]
+
+
+def test_batch_zotero_skips_prefetch_for_already_tried_items(tmp_path, monkeypatch):
+    from doi2pdf.batch_journal import append as append_batch_log
+    from doi2pdf.models import FetchResult
+
+    db = tmp_path / "zotero.sqlite"
+    db.touch()
+    items = [
+        {"key": "AAA1AAA1", "title": "One", "doi": "10.1/one", "year": "2020", "author": "Smith"},
+        {"key": "BBB2BBB2", "title": "Two", "doi": "10.1/two", "year": "2021", "author": "Jones"},
+    ]
+    log_path = tmp_path / "log.jsonl"
+    append_batch_log(log_path, {"item_key": "AAA1AAA1", "doi": "10.1/one", "title": "One", "status": "success", "route": "unpaywall", "path": str(tmp_path / "one.pdf")})
+
+    class FakeZoteroLibrary:
+        def __init__(self, path):
+            pass
+
+        def missing_pdfs(self, limit):
+            return items
+
+    prefetch_calls = []
+
+    class FakeOA:
+        def prefetch_openalex_batch(self, dois):
+            prefetch_calls.append(list(dois))
+
+    class FakeApp:
+        def __init__(self, settings):
+            self.oa = FakeOA()
+
+        def fetch(self, identifier, output, use_institution):
+            return FetchResult(doi=identifier or "unknown", ok=False, path=output)
+
+    monkeypatch.setattr(cli, "ZoteroLibrary", FakeZoteroLibrary)
+    monkeypatch.setattr(cli, "DOI2PDF", FakeApp)
+    monkeypatch.setattr(
+        cli.Settings,
+        "from_env",
+        lambda: Settings(contact_email="agent@example.org", unpaywall_email="agent@example.org"),
+    )
+
+    cli.main([
+        "--json", "batch-zotero", "--db", str(db), "--resume",
+        "--output-dir", str(tmp_path / "out"), "--log", str(log_path),
+    ])
+
+    # AAA1AAA1 already succeeded per the journal; only the untried DOI is prefetched.
+    assert prefetch_calls == [["10.1/two"]]
+
+
 def test_skill_installer_dry_run_uses_local_project():
     script = Path("skills/doi2pdf/scripts/install_cli.py")
     completed = subprocess.run(

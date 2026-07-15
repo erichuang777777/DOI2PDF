@@ -213,3 +213,62 @@ def test_candidates_preserve_priority_order_regardless_of_completion_order():
     assert [candidate.url for candidate in candidates] == [
         "https://first.example/a.pdf", "https://second.example/a.pdf",
     ]
+
+
+def test_prefetch_openalex_batch_uses_the_filter_endpoint_and_warms_the_cache():
+    class BatchHttp(FakeHttp):
+        def __init__(self):
+            self.calls = []
+
+        def get_json(self, url, **kwargs):
+            self.calls.append((url, kwargs.get("params")))
+            if url != "https://api.openalex.org/works":
+                raise AssertionError(f"openalex() should not be called for a prefetched DOI, got {url}")
+            return {"results": [
+                {"doi": "https://doi.org/10.1/a", "best_oa_location": {"pdf_url": "https://oa.example/a.pdf"}},
+            ]}
+
+    http = BatchHttp()
+    resolver = OpenAccessResolver(Settings(), http)
+    resolver.prefetch_openalex_batch(["10.1/a", "10.1/b"])
+
+    assert len(http.calls) == 1
+    assert http.calls[0][0] == "https://api.openalex.org/works"
+    assert http.calls[0][1]["filter"] == "doi:10.1%2Fa|10.1%2Fb"
+
+    # 10.1/a was in the batch response: cached with its candidate, no re-query.
+    candidates = resolver.openalex("10.1/a")
+    assert [c.url for c in candidates] == ["https://oa.example/a.pdf"]
+    # 10.1/b was absent from the response: cached as "no candidates", no re-query.
+    assert resolver.openalex("10.1/b") == []
+    assert len(http.calls) == 1
+
+
+def test_prefetch_openalex_batch_chunks_large_doi_lists():
+    class CountingHttp(FakeHttp):
+        def __init__(self):
+            self.filters = []
+
+        def get_json(self, url, **kwargs):
+            self.filters.append(kwargs.get("params", {}).get("filter"))
+            return {"results": []}
+
+    http = CountingHttp()
+    resolver = OpenAccessResolver(Settings(), http)
+    dois = [f"10.1/item{i}" for i in range(60)]
+    resolver.prefetch_openalex_batch(dois, chunk_size=25)
+    assert len(http.filters) == 3  # 25 + 25 + 10
+
+
+def test_prefetch_openalex_batch_failure_falls_back_to_per_doi_queries():
+    class FlakyHttp(FakeHttp):
+        def get_json(self, url, **kwargs):
+            if url == "https://api.openalex.org/works":
+                raise RuntimeError("openalex is down")
+            return super().get_json(url, **kwargs)
+
+    resolver = OpenAccessResolver(Settings(), FlakyHttp())
+    resolver.prefetch_openalex_batch(["10.1/a"])
+    # The prefetch failed silently; openalex() still works via its own request.
+    candidates = resolver.openalex("10.1/a")
+    assert candidates[0].url == "https://oa.example/a.pdf"
