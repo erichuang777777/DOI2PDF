@@ -37,11 +37,13 @@ page, stored in the ignored `.env`, and never rendered back to the browser or ag
 
 ## Local web console
 
-The local-only console provides four operational views:
+The local-only console provides five operational views:
 
 - **Fetch** starts a background retrieval without blocking the browser request.
 - **Progress** shows the current lawful layer, completion percentage, and sanitized route events.
 - **Activity** monitors the latest 50 jobs and updates once per second.
+- **Acceptance** offers 5–10 real publisher papers for deliberate, one-at-a-time tests with
+  the user's own institutional access; it never launches a bulk run.
 - **Settings** manages environment configuration without rendering stored API-key values.
 
 Activity logs stay in memory and reset when the server restarts. They omit candidate URLs,
@@ -98,6 +100,13 @@ local Playwright profile.
 # Validate configuration (machine-readable flag works before or after the command)
 doi2pdf doctor --json
 
+# Send low-volume real requests to configured APIs; no mock response and no key output
+doi2pdf api-check --json
+
+# List the curated real-paper acceptance set, optionally filtered by publisher
+doi2pdf acceptance --json
+doi2pdf acceptance --publisher Elsevier --json
+
 # OA/TDM only
 doi2pdf --json fetch 10.1186/s12984-023-01168-x --no-institution
 
@@ -113,6 +122,17 @@ doi2pdf resolve "PMID:12345678"
 # Read-only Zotero scan; downloads missing PDFs with the legacy filename rule
 doi2pdf --json batch-zotero --db "$HOME\Zotero\zotero.sqlite" --limit 10
 ```
+
+## Live acceptance testing
+
+The acceptance set is a small dated corpus of real records from Elsevier, Wiley, Nature
+Portfolio, NEJM, and Oxford University Press. Each case was attempted from a
+machine without subscription access before inclusion. Some are subscription controls; known
+OA misses are labeled separately because they diagnose discovery or publisher-route gaps.
+
+Open **Acceptance** in the console and press **Try with my access** for one paper at a time.
+The normal progress tracker records which route succeeded. There is intentionally no
+"test all" action: institutional rate limits and publisher terms still apply.
 
 Without `-o`, the legacy Zotero naming rule is preserved:
 `{ZoteroKey}_{FirstAuthorLastName}_{Year}.pdf`. Explicit values can be supplied:

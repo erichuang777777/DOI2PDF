@@ -40,6 +40,24 @@ def test_invalid_identifier_json_stays_on_stdout(capsys, monkeypatch):
     assert captured.err == ""
 
 
+def test_acceptance_lists_real_cases_and_filters_publisher(capsys):
+    assert cli.main(["acceptance", "--publisher", "Elsevier", "--json"]) == cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "ready"
+    assert payload["count"] == 2
+    assert all(row["publisher"] == "Elsevier" for row in payload["cases"])
+    assert all(row["doi"].startswith("10.") for row in payload["cases"])
+
+
+def test_api_check_without_keys_is_explicit_and_does_not_call_network(capsys, monkeypatch):
+    monkeypatch.setattr(cli.Settings, "from_env", lambda: Settings())
+    assert cli.main(["api-check", "--json"]) == cli.EXIT_INPUT_OR_CONFIG
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "no_keys_configured"
+    assert len(payload["results"]) == 5
+    assert {row["status"] for row in payload["results"]} == {"not_configured"}
+
+
 def test_skill_installer_dry_run_uses_local_project():
     script = Path("skills/doi2pdf/scripts/install_cli.py")
     completed = subprocess.run(

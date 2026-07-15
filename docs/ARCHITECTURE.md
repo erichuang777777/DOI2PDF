@@ -33,6 +33,12 @@ The local web interface is a loopback-only wrapper around the same package. It h
 separate retrieval logic, so CLI, web, Zotero batch, and agent-skill behavior share the same
 validation and safety invariants.
 
+Acceptance testing uses a small source-controlled corpus of real DOI records with a dated
+no-access baseline. The CLI lists cases and the web console submits exactly one case through
+the ordinary background retrieval path. API credential diagnostics likewise use real
+provider requests, but return only stable classifications and HTTP status codes. Neither
+feature stores or renders secrets, and neither provides a bulk execution path.
+
 On first launch, the web application requires a real API contact email and records setup
 completion in the ignored `.env`. Retrieved files are exposed to the browser only through
 random in-memory tokens; clients cannot request arbitrary filesystem paths. Tokens expire

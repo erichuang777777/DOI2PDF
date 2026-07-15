@@ -4,8 +4,8 @@ Prefer the HTML page launched by `doi2pdf-web` for first-time configuration. It 
 to the local `.env`, loads them into the running process environment, and renders only their
 configured state afterward; it never sends a stored key back to the browser.
 
-The local console uses `/` for fetch, `/activity` for sanitized in-memory job logs,
-`/configure` for settings, `/jobs/<id>` for progress, and `/health` for machine-readable
+The local console uses `/` for fetch, `/acceptance` for the real one-at-a-time test corpus,
+`/activity` for sanitized in-memory job logs, `/configure` for settings, `/jobs/<id>` for progress, and `/health` for machine-readable
 readiness. Progress APIs intentionally omit local paths, secret values, cookies, headers, and
 candidate URLs.
 
@@ -30,6 +30,13 @@ candidate URLs.
 | `SPRINGER_API_KEY` | Springer Nature OA metadata API |
 
 Users must register their own keys and comply with publisher terms. Never print their values.
+
+After saving keys, use **Test configured API keys** or `doi2pdf api-check --json`. The probe
+sends low-volume real requests and reports only configured state, a stable status, and the
+HTTP code. `key_accepted` proves the provider accepted the credential for that request; it
+does not promise that every article is licensed. `rejected_or_not_entitled` may require a
+publisher account or institutional entitlement check. `rate_limited` means stop and retry
+later, not increase concurrency.
 
 ## Zotero translators
 

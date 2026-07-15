@@ -18,16 +18,20 @@ out of prompts, command arguments, logs, and responses.
    HTML console. Use **Settings** for configuration, **Activity** for sanitized live logs, and
    the job progress page for route-by-route monitoring. Never ask the user to paste an API key
    or password into chat.
-3. Normalize and verify the DOI; never invent one. If only a title/PMID is available, resolve
+3. After configuring optional API keys, run `doi2pdf api-check --json`. This performs one
+   small request against each configured real API; it is not a mock and never returns key
+   values. Treat `not_configured` as optional, `invalid_or_unauthorized` as a credential
+   problem, and `rejected_or_not_entitled` as either entitlement or publisher policy.
+4. Normalize and verify the DOI; never invent one. If only a title/PMID is available, resolve
    it through a trustworthy metadata service before fetching.
-4. Prefer `doi2pdf fetch <DOI> --no-institution --json` first. Parse the JSON
+5. Prefer `doi2pdf fetch <DOI> --no-institution --json` first. Parse the JSON
    envelope; do not scrape human logs.
-5. If OA/TDM routes fail and the user has legitimate subscription access, check that their
+6. If OA/TDM routes fail and the user has legitimate subscription access, check that their
    own OpenAthens or EZproxy prefix is configured. Run `doi2pdf login --json` when an
    interactive SSO/MFA session is needed, then retry without `--no-institution`.
-6. If all automatic routes fail, return `resolver_url` for manual completion. Do not add an
+7. If all automatic routes fail, return `resolver_url` for manual completion. Do not add an
    unauthorized fallback.
-7. Report the winning `layer`, `route`, output path, byte count, hash, and relevant failed
+8. Report the winning `layer`, `route`, output path, byte count, hash, and relevant failed
    route statuses. Never expose keys, cookies, headers, or credentials.
 
 For nontechnical local use, launch `DOI2PDF.bat`. Complete `/setup` on first run, retrieve
@@ -62,6 +66,8 @@ CLI succeeds but the website appears not to provide a file, verify the result pa
 
 ```powershell
 doi2pdf doctor --json
+doi2pdf api-check --json
+doi2pdf acceptance --json
 doi2pdf resolve "https://doi.org/10.1186/s12984-023-01168-x" --json
 doi2pdf fetch 10.1186/s12984-023-01168-x --no-institution --json
 doi2pdf login --json
@@ -72,6 +78,11 @@ doi2pdf batch-zotero --db "$HOME\Zotero\zotero.sqlite" --limit 10 --json
 Treat exit `2` as invalid input/setup, `3` as no automatic PDF/manual completion, `4` as
 human login required, and `5` as an unexpected runtime failure. Always inspect `status` and
 `resolver_url` in the JSON envelope before deciding the next action.
+
+When validating institutional behavior that the agent cannot access itself, use
+`doi2pdf acceptance --json` or the console's **Acceptance** page. The corpus contains real,
+dated failures from several publishers and offers only one-at-a-time retrieval. Do not turn
+it into a bulk downloader. Keep OA discovery-gap cases distinct from subscription controls.
 
 Read [references/configuration.md](references/configuration.md) when configuring API keys,
 Zotero translation-server, OpenAthens, EZproxy, or resolver templates.
