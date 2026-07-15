@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote
 
 from .config import Settings
@@ -23,6 +25,8 @@ class OpenAccessResolver:
     def __init__(self, settings: Settings, http: HttpClient):
         self.settings = settings
         self.http = http
+        self._pmcid_cache: dict[str, str | None] = {}
+        self._pmcid_lock = threading.Lock()
 
     def unpaywall(self, doi: str) -> list[Candidate]:
         if not self.settings.unpaywall_email:
@@ -72,19 +76,78 @@ class OpenAccessResolver:
                 candidates.append(Candidate(location["landing_page_url"], "openalex", "open_access", "landing"))
         return _unique(candidates)
 
+    def _pmcid(self, doi: str) -> str | None:
+        """Resolve a DOI to a PMCID via NCBI idconv, cached per instance.
+
+        europe_pmc() and pmc_direct() both need this lookup; without the cache
+        (and the lock, since candidates() now runs sources concurrently) a single
+        fetch could hit idconv twice for no reason.
+        """
+        with self._pmcid_lock:
+            if doi in self._pmcid_cache:
+                return self._pmcid_cache[doi]
+            params = {"ids": doi, "format": "json", "tool": "doi2pdf"}
+            if self.settings.contact_email:
+                params["email"] = self.settings.contact_email
+            if self.settings.pubmed_api_key:
+                params["api_key"] = self.settings.pubmed_api_key
+            data = self.http.get_json("https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/", params=params)
+            pmcid = None
+            for record in data.get("records") or []:
+                if record.get("pmcid"):
+                    pmcid = record["pmcid"].upper()
+                    break
+            self._pmcid_cache[doi] = pmcid
+            return pmcid
+
     def europe_pmc(self, doi: str) -> list[Candidate]:
-        params = {"ids": doi, "format": "json", "tool": "doi2pdf"}
-        if self.settings.contact_email:
-            params["email"] = self.settings.contact_email
-        if self.settings.pubmed_api_key:
-            params["api_key"] = self.settings.pubmed_api_key
-        data = self.http.get_json("https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/", params=params)
-        result: list[Candidate] = []
-        for record in data.get("records") or []:
-            if record.get("pmcid"):
-                pmcid = record["pmcid"].upper()
-                result.append(Candidate(f"https://europepmc.org/articles/{pmcid}?pdf=render", "europe_pmc", "open_access"))
-        return result
+        pmcid = self._pmcid(doi)
+        return [Candidate(f"https://europepmc.org/articles/{pmcid}?pdf=render", "europe_pmc", "open_access")] if pmcid else []
+
+    def pmc_direct(self, doi: str) -> list[Candidate]:
+        """NCBI's own PMC front end, as a fallback when Europe PMC rendering fails."""
+        pmcid = self._pmcid(doi)
+        return [Candidate(f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/", "pmc_direct", "open_access")] if pmcid else []
+
+    def crossref_links(self, doi: str) -> list[Candidate]:
+        """Crossref publishes direct full-text links for many OA publishers (PLOS, MDPI, Hindawi, ...)."""
+        data = self.http.get_json(
+            f"https://api.crossref.org/works/{quote(doi, safe='/')}",
+            headers={"User-Agent": f"DOI2PDF/0.1 (mailto:{self.settings.contact_email})"} if self.settings.contact_email else {},
+        )
+        message = data.get("message") or {}
+        candidates = [
+            Candidate(link["URL"], "crossref", "open_access")
+            for link in message.get("link") or []
+            if link.get("content-type") == "application/pdf" and link.get("URL")
+        ]
+        return _unique(candidates)
+
+    def core(self, doi: str) -> list[Candidate]:
+        """Optional; requires a free CORE API key (CORE_API_KEY)."""
+        if not self.settings.core_api_key:
+            return []
+        data = self.http.get_json(
+            "https://api.core.ac.uk/v3/search/works/",
+            params={"q": f'doi:"{doi}"'},
+            headers={"Authorization": f"Bearer {self.settings.core_api_key}"},
+        )
+        candidates = [
+            Candidate(result["downloadUrl"], "core", "open_access")
+            for result in data.get("results") or []
+            if result.get("downloadUrl")
+        ]
+        return _unique(candidates)
+
+    def doaj(self, doi: str) -> list[Candidate]:
+        """DOAJ indexes fully-OA journals and often links straight to the full text."""
+        data = self.http.get_json(f"https://doaj.org/api/search/articles/doi%3A{quote(doi, safe='')}")
+        candidates: list[Candidate] = []
+        for result in data.get("results") or []:
+            for link in (result.get("bibjson") or {}).get("link") or []:
+                if link.get("type") == "fulltext" and link.get("url"):
+                    candidates.append(Candidate(link["url"], "doaj", "open_access"))
+        return _unique(candidates)
 
     def paper_radar(self, doi: str) -> list[Candidate]:
         database = self.settings.paper_radar_db
@@ -127,19 +190,34 @@ class OpenAccessResolver:
         return []
 
     def candidates(self, doi: str) -> tuple[list[Candidate], list[tuple[str, str]]]:
-        candidates: list[Candidate] = []
-        errors: list[tuple[str, str]] = []
-        for name, resolver in (
+        order = (
             ("unpaywall", self.unpaywall),
             ("semantic_scholar", self.semantic_scholar),
             ("openalex", self.openalex),
+            ("crossref_links", self.crossref_links),
             ("europe_pmc", self.europe_pmc),
             ("europe_pmc_search", self.europe_pmc_search),
+            ("pmc_direct", self.pmc_direct),
             ("arxiv", self.arxiv),
+            ("core", self.core),
+            ("doaj", self.doaj),
             ("paper_radar", self.paper_radar),
-        ):
-            try:
-                candidates.extend(resolver(doi))
-            except Exception as exc:
-                errors.append((name, f"{exc.__class__.__name__}: {exc}"))
+        )
+        # These indexes are independent network round-trips; querying them one at a
+        # time meant one slow source (e.g. the arXiv Atom API) delayed every other
+        # source behind it. Running them concurrently keeps the wall-clock close to
+        # the single slowest source instead of their sum. The *download* priority
+        # order below is unaffected: results are merged back in `order`, not in
+        # completion order, so _try_candidates still tries Unpaywall before arXiv.
+        results: dict[str, list[Candidate]] = {}
+        errors: list[tuple[str, str]] = []
+        with ThreadPoolExecutor(max_workers=min(8, len(order))) as executor:
+            future_to_name = {executor.submit(resolver, doi): name for name, resolver in order}
+            for future in as_completed(future_to_name):
+                name = future_to_name[future]
+                try:
+                    results[name] = future.result()
+                except Exception as exc:
+                    errors.append((name, f"{exc.__class__.__name__}: {exc}"))
+        candidates = [candidate for name, _ in order for candidate in results.get(name, [])]
         return _unique(candidates), errors

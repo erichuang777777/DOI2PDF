@@ -59,3 +59,20 @@ def test_springer_prefers_official_oa_api_pdf(monkeypatch):
     assert calls[0][0] == "https://api.springernature.com/openaccess/json"
     assert calls[0][1]["params"]["api_key"] == "key"
     assert calls[1][0] == "https://springer.example/paper.pdf"
+
+
+def test_uses_injected_session_instead_of_the_requests_module(monkeypatch):
+    def fail_if_called(url, **kwargs):
+        raise AssertionError("should have used the injected session, not requests.get")
+
+    monkeypatch.setattr("doi2pdf.tdm.requests.get", fail_if_called)
+
+    class FakeSession:
+        def get(self, url, **kwargs):
+            return Response(PDF)
+
+    session = FakeSession()
+    resolver = TDMResolver(Settings(elsevier_api_key="key"), session=session)
+    assert resolver.session is session
+    content, status = resolver.elsevier("10.1016/test")
+    assert content == PDF and status == "pdf"

@@ -9,14 +9,18 @@ from .http import looks_like_pdf
 
 
 class TDMResolver:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, session: requests.Session | None = None):
         self.settings = settings
+        # Defaulting to the `requests` module (not a Session) preserves the exact
+        # prior per-call behavior when no shared session is supplied; the module's
+        # top-level get() has the same signature as Session.get().
+        self.session = session or requests
         contact = f" (mailto:{settings.contact_email})" if settings.contact_email else ""
         self.user_agent = f"DOI2PDF/0.1{contact}"
 
     def _get(self, url: str, headers: dict[str, str]) -> tuple[bytes | None, str]:
         try:
-            response = requests.get(url, headers=headers, timeout=max(5, self.settings.request_timeout_s))
+            response = self.session.get(url, headers=headers, timeout=max(5, self.settings.request_timeout_s))
         except requests.RequestException as exc:
             return None, f"request_error:{exc.__class__.__name__}"
         if response.status_code != 200:
@@ -50,7 +54,7 @@ class TDMResolver:
         headers = {"Accept": "application/pdf", "User-Agent": self.user_agent}
         if self.settings.springer_api_key:
             try:
-                response = requests.get(
+                response = self.session.get(
                     "https://api.springernature.com/openaccess/json",
                     params={"q": f"doi:{doi}", "api_key": self.settings.springer_api_key},
                     headers={"User-Agent": self.user_agent},
