@@ -18,11 +18,17 @@ from .translator import ZoteroTranslatorClient
 class DOI2PDF:
     def __init__(self, settings: Settings | None = None, http: HttpClient | None = None):
         self.settings = settings or Settings.from_env()
-        self.http = http or HttpClient(self.settings.contact_email or self.settings.unpaywall_email, self.settings.request_timeout_s)
+        self.http = http or HttpClient(
+            self.settings.contact_email or self.settings.unpaywall_email,
+            self.settings.request_timeout_s,
+            max_retries=self.settings.http_max_retries,
+        )
         self.oa = OpenAccessResolver(self.settings, self.http)
         self.identifiers = IdentifierResolver(self.settings, self.http)
-        self.tdm = TDMResolver(self.settings)
-        self.translator = ZoteroTranslatorClient(self.settings)
+        # Reusing HttpClient's session gives tdm/translator the same connection
+        # pool, User-Agent, and retry adapter as the rest of the fetch pipeline.
+        self.tdm = TDMResolver(self.settings, session=self.http.session)
+        self.translator = ZoteroTranslatorClient(self.settings, session=self.http.session)
         self.institution = InstitutionalBrowser(self.settings)
 
     def fetch(

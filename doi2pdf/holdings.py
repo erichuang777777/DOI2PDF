@@ -43,10 +43,11 @@ def coverage_ok(coverage: str | None, year: int | None) -> bool | None:
 
 
 class Holdings:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, session: requests.Session | None = None):
         self.settings = settings
         self.db = settings.holdings_db
         self.cache = settings.browser_profile / "doi_metadata_cache.json"
+        self.session = session or requests
 
     @property
     def configured(self) -> bool:
@@ -60,7 +61,7 @@ class Holdings:
         if doi in cache:
             return cache[doi]
         metadata: dict[str, Any] = {"issns": [], "journal": "", "year": None}
-        response = requests.get(
+        response = self.session.get(
             f"https://api.crossref.org/works/{quote(doi, safe='/')}",
             headers={"User-Agent": f"DOI2PDF holdings (mailto:{self.settings.contact_email})"},
             timeout=max(5, self.settings.request_timeout_s),

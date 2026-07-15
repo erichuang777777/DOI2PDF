@@ -11,6 +11,8 @@ PDF = PDF_MAGIC + b" test\n" + b"0" * 2048
 
 
 class FakeHttp:
+    session = None
+
     def fetch_pdf(self, url, referer=None):
         return (PDF, "pdf") if url.endswith("good.pdf") else (None, "not_pdf")
 
@@ -79,3 +81,9 @@ def test_institution_route_and_entitlement_are_preserved(tmp_path: Path):
     result = app.fetch("10.1056/NEJMoa1", tmp_path / "paper.pdf")
     assert result.ok and result.route == "openathens:nejm:tpl"
     assert result.metadata["entitlement"]["covered"] is True
+
+
+def test_tdm_and_translator_share_the_http_client_session():
+    app = DOI2PDF(Settings(translator_enabled=False))
+    assert app.tdm.session is app.http.session
+    assert app.translator.session is app.http.session

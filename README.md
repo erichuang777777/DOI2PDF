@@ -9,7 +9,9 @@ The audited upstream-to-DOI2PDF function checklist is maintained in
 It tries, in order:
 
 1. **Open access** — every Unpaywall OA location, Semantic Scholar `openAccessPdf`, every
-   OpenAlex location, PMC→Europe PMC rendering, and repository `citation_pdf_url`.
+   OpenAlex location, Crossref `link` full-text entries, PMC→Europe PMC rendering, the
+   direct NCBI PMC front end, arXiv, an optional CORE lookup (needs a free `CORE_API_KEY`),
+   DOAJ, and repository `citation_pdf_url`.
 2. **Publisher TDM APIs** — Elsevier, Wiley, and Springer using credentials registered by
    the user with those publishers.
 3. **Institutional access** — PDF attachments exposed by Zotero translators, then the

@@ -27,3 +27,25 @@ def test_holdings_is_read_only_and_matches_issn(tmp_path: Path):
     assert result["covered"] is True
     assert result["platform"] == "Wiley"
     assert holdings.platforms() == [{"platform": "Wiley", "journals": 1}]
+
+
+def test_doi_metadata_uses_injected_session(tmp_path: Path):
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"message": {"ISSN": ["1234-5678"], "container-title": ["Example Journal"], "issued": {"date-parts": [[2026]]}}}
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, **kwargs):
+            self.calls += 1
+            return Response()
+
+    session = FakeSession()
+    holdings = Holdings(Settings(browser_profile=tmp_path / "profile", contact_email="a@example.org"), session=session)
+    metadata = holdings.doi_metadata("10.1234/example")
+    assert metadata["journal"] == "Example Journal"
+    assert session.calls == 1

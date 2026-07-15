@@ -6,6 +6,8 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 PDF_MAGIC = b"%PDF-"
@@ -16,11 +18,32 @@ def looks_like_pdf(content: bytes) -> bool:
 
 
 class HttpClient:
-    def __init__(self, contact: str, timeout: int = 45, session: requests.Session | None = None):
+    def __init__(
+        self,
+        contact: str,
+        timeout: int = 45,
+        session: requests.Session | None = None,
+        max_retries: int = 3,
+    ):
         self.timeout = timeout
         self.session = session or requests.Session()
         suffix = f" (mailto:{contact})" if contact else ""
         self.session.headers.update({"User-Agent": f"DOI2PDF/0.1{suffix}"})
+        if max_retries > 0:
+            # Transient 5xx/timeouts previously made a whole layer fail immediately
+            # and fall through to the next one, needlessly lowering the success rate.
+            # HttpClient only ever performs GETs, so retries are always idempotent.
+            retry = Retry(
+                total=max_retries,
+                backoff_factor=0.5,
+                backoff_max=8,
+                status_forcelist=(429, 500, 502, 503, 504),
+                allowed_methods=frozenset({"GET"}),
+                respect_retry_after_header=True,
+            )
+            adapter = HTTPAdapter(max_retries=retry)
+            self.session.mount("https://", adapter)
+            self.session.mount("http://", adapter)
 
     def get_json(self, url: str, **kwargs):
         response = self.session.get(url, timeout=self.timeout, **kwargs)

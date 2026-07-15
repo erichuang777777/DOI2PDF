@@ -11,12 +11,13 @@ from .models import Candidate
 class ZoteroTranslatorClient:
     """Thin client for Zotero translation-server; the AGPL server stays a separate process."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, session: requests.Session | None = None):
         self.base = settings.translator_url
         self.timeout = settings.request_timeout_s
+        self.session = session or requests
 
     def _post(self, endpoint: str, value: str) -> Any:
-        response = requests.post(
+        response = self.session.post(
             f"{self.base}/{endpoint}", data=value.encode("utf-8"),
             headers={"Content-Type": "text/plain", "Accept": "application/json"}, timeout=self.timeout,
         )

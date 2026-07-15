@@ -49,8 +49,10 @@ class Settings:
     browser_profile: Path = field(default_factory=lambda: Path.home() / ".doi2pdf" / "browser")
     browser_headless: bool = False
     request_timeout_s: int = 45
+    http_max_retries: int = 3
     min_institution_interval_s: float = 15.0
     max_institution_requests_per_day: int = 100
+    core_api_key: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -93,12 +95,14 @@ class Settings:
             browser_profile=Path(os.getenv("DOI2PDF_BROWSER_PROFILE", str(Path.home() / ".doi2pdf" / "browser"))),
             browser_headless=_bool("DOI2PDF_BROWSER_HEADLESS", False),
             request_timeout_s=int(os.getenv("DOI2PDF_REQUEST_TIMEOUT_S", "45")),
+            http_max_retries=max(0, int(os.getenv("DOI2PDF_HTTP_MAX_RETRIES", "3"))),
             # Institutional automation always retains a courtesy floor. This is not
             # configurable to zero because one user's burst can block the whole campus.
             min_institution_interval_s=max(15.0, float(os.getenv("DOI2PDF_INSTITUTION_INTERVAL_S", "15"))),
             max_institution_requests_per_day=max(
                 1, min(100, int(os.getenv("DOI2PDF_MAX_INSTITUTION_REQUESTS_PER_DAY", "100")))
             ),
+            core_api_key=os.getenv("CORE_API_KEY", ""),
         )
 
     def resolver_url(self, doi: str) -> str | None:

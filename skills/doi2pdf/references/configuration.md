@@ -27,6 +27,8 @@ Each API field in `/configure` links to the provider's official application inst
 | `UNPAYWALL_EMAIL` | Unpaywall v2 API identity | For Unpaywall |
 | `PUBMED_API_KEY` | NCBI id-converter quota | Optional |
 | `S2_API_KEY` | Semantic Scholar quota | Optional |
+| `CORE_API_KEY` | Enables the CORE open-access index | Optional |
+| `DOI2PDF_HTTP_MAX_RETRIES` | Retries for transient 5xx/timeouts on OA/TDM requests (default 3) | Optional |
 | `DOI2PDF_SETUP_COMPLETE` | First-run web wizard state | Written by UI |
 | `DOWNLOAD_DIR` | Default local PDF folder | Optional |
 | `PAPER_RADAR_DB` | Read-only `papers(doi, oa_pdf_url)` fallback | Optional |
