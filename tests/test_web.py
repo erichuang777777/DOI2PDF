@@ -228,6 +228,70 @@ def test_job_log_redacts_configured_secrets(monkeypatch):
     assert "[redacted]" in str(payload)
 
 
+class _Headers(dict):
+    """Case-insensitive header lookup like Starlette's Headers."""
+
+    def get(self, key, default=None):
+        return super().get(key.lower(), default)
+
+
+def test_origin_guard_allows_loopback_get():
+    headers = _Headers({"host": "127.0.0.1:8765"})
+    assert web._origin_guard("GET", headers) is None
+
+
+def test_origin_guard_rejects_foreign_host_for_dns_rebinding():
+    headers = _Headers({"host": "evil.example.com"})
+    assert web._origin_guard("GET", headers) == "host_not_allowed"
+
+
+def test_origin_guard_allows_same_origin_post():
+    headers = _Headers({"host": "127.0.0.1:8765", "origin": "http://127.0.0.1:8765"})
+    assert web._origin_guard("POST", headers) is None
+
+
+def test_origin_guard_rejects_cross_site_post():
+    headers = _Headers({"host": "127.0.0.1:8765", "origin": "http://evil.example.com"})
+    assert web._origin_guard("POST", headers) == "cross_origin"
+
+
+def test_origin_guard_rejects_post_without_origin_or_referer():
+    headers = _Headers({"host": "127.0.0.1:8765"})
+    assert web._origin_guard("POST", headers) == "missing_origin"
+
+
+def test_origin_guard_accepts_referer_fallback():
+    headers = _Headers({"host": "localhost:8765", "referer": "http://localhost:8765/configure"})
+    assert web._origin_guard("POST", headers) is None
+
+
+def test_resolve_output_dir_allows_subfolder_of_root(tmp_path):
+    settings = web.Settings(download_dir=tmp_path)
+    resolved = web._resolve_output_dir(str(tmp_path / "sub"), settings)
+    assert resolved == (tmp_path / "sub").resolve()
+
+
+def test_resolve_output_dir_blocks_parent_traversal(tmp_path):
+    settings = web.Settings(download_dir=tmp_path / "downloads")
+    import pytest
+
+    with pytest.raises(ValueError):
+        web._resolve_output_dir(str(tmp_path / "downloads" / ".." / ".." / "evil"), settings)
+
+
+def test_resolve_output_dir_blocks_absolute_escape(tmp_path):
+    settings = web.Settings(download_dir=tmp_path / "downloads")
+    import pytest
+
+    with pytest.raises(ValueError):
+        web._resolve_output_dir("/tmp/attacker", settings)
+
+
+def test_resolve_output_dir_defaults_to_configured_root(tmp_path):
+    settings = web.Settings(download_dir=tmp_path)
+    assert web._resolve_output_dir("", settings) == tmp_path.resolve()
+
+
 def json_from_response(response):
     import json
 

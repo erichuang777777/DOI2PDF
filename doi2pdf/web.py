@@ -41,6 +41,55 @@ _JOB_LOCK = threading.RLock()
 MAX_ACTIVE_WEB_JOBS = 2
 _LOGIN_STATE: dict[str, Any] = {"state": "idle", "message": "No login session is running."}
 
+# The console is served only on loopback, but loopback binding alone does not
+# stop a cross-site POST or DNS rebinding: any page the user has open in a
+# browser can POST to http://127.0.0.1:8765 and rewrite .env, start a login, or
+# launch a fetch. We require a loopback Host header (defeats DNS rebinding) and,
+# for state-changing methods, a same-origin Origin/Referer (defeats CSRF).
+BIND_HOST = "127.0.0.1"
+BIND_PORT = 8765
+_ALLOWED_HOSTS = frozenset({
+    f"{BIND_HOST}:{BIND_PORT}", f"localhost:{BIND_PORT}", BIND_HOST, "localhost",
+})
+_ALLOWED_ORIGINS = frozenset({
+    f"http://{BIND_HOST}:{BIND_PORT}", f"http://localhost:{BIND_PORT}",
+})
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _origin_guard(method: str, headers: Any) -> str | None:
+    """Return a rejection reason if the request is not a trusted local one.
+
+    Returns ``None`` when the request may proceed. Kept as a pure function so it
+    can be unit-tested without an ASGI stack.
+    """
+    host = (headers.get("host") or "").split(",")[0].strip().lower()
+    if host not in _ALLOWED_HOSTS:
+        return "host_not_allowed"
+    if method.upper() in _SAFE_METHODS:
+        return None
+    origin = (headers.get("origin") or "").strip().lower().rstrip("/")
+    if origin:
+        return None if origin in _ALLOWED_ORIGINS else "cross_origin"
+    referer = (headers.get("referer") or "").strip()
+    if referer:
+        parts = urllib.parse.urlsplit(referer)
+        base = f"{parts.scheme}://{parts.netloc}".lower()
+        return None if base in _ALLOWED_ORIGINS else "cross_origin"
+    # A same-origin browser form POST always carries Origin (and usually
+    # Referer). Reject state-changing requests that carry neither.
+    return "missing_origin"
+
+
+@app.middleware("http")
+async def enforce_local_origin(request: Request, call_next):
+    if _origin_guard(request.method, request.headers):
+        return JSONResponse(
+            {"detail": "Request blocked by DOI2PDF local-origin protection."},
+            status_code=403,
+        )
+    return await call_next(request)
+
 
 API_HELP = {
     "pubmed": ("Optional. Create it in My NCBI account settings.", "https://www.ncbi.nlm.nih.gov/account/settings/"),
@@ -129,8 +178,13 @@ def _write_env(updates: dict[str, str]) -> None:
     ENV_PATH.write_text("\n".join(f"{key}={existing[key]}" for key in order) + "\n", encoding="utf-8")
     try:
         ENV_PATH.chmod(0o600)
-    except OSError:
-        pass
+    except OSError as exc:
+        # On POSIX a failure here means the secrets file is left world-readable;
+        # warn rather than fail silently. (chmod is a no-op on Windows.)
+        if os.name == "posix":
+            import warnings
+
+            warnings.warn(f"Could not restrict {ENV_PATH} permissions to 0600: {exc}", stacklevel=2)
     # Make saved values available to the running CLI/web process immediately.
     for key, value in existing.items():
         os.environ[key] = value
@@ -139,6 +193,21 @@ def _write_env(updates: dict[str, str]) -> None:
 def _parse_body(body: bytes) -> dict[str, str]:
     parsed = urllib.parse.parse_qs(body.decode("utf-8"), keep_blank_values=True)
     return {key: values[-1] for key, values in parsed.items()}
+
+
+def _resolve_output_dir(raw: str, settings: Settings) -> Path:
+    """Confine a browser-supplied save folder to the configured download root.
+
+    Without this, a form value like ``../../`` or an absolute path could plant a
+    valid-PDF blob anywhere the process can write (e.g. a Startup folder). The
+    CLI's ``-o`` is deliberately unrestricted local-user autonomy; only the web
+    form is confined.
+    """
+    root = Path(settings.download_dir).expanduser().resolve()
+    requested = Path((raw or "").strip() or settings.download_dir).expanduser().resolve()
+    if requested == root or requested.is_relative_to(root):
+        return requested
+    raise ValueError("Save folder must be inside the configured download folder.")
 
 
 def _register_file(path: Path) -> str:
@@ -365,6 +434,10 @@ async def fetch(request: Request):
     identifier = form.get("identifier", "").strip()
     if not identifier:
         return _layout("Error", '<section class="card"><p class="bad">An identifier is required.</p></section>')
+    try:
+        form["output_dir"] = str(_resolve_output_dir(form.get("output_dir", ""), _settings()))
+    except ValueError as exc:
+        return _layout("Error", f'<section class="card"><p class="bad">{html.escape(str(exc))}</p><a class="button" href="/">Back to retrieval</a></section>')
     try:
         job_id = _new_job(identifier)
     except Exception as exc:
