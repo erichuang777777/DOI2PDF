@@ -29,6 +29,10 @@ out of prompts, command arguments, logs, and responses.
 6. If OA/TDM routes fail and the user has legitimate subscription access, check that their
    own OpenAthens or EZproxy prefix is configured. Run `doi2pdf login --json` when an
    interactive SSO/MFA session is needed, then retry without `--no-institution`.
+   Run `doi2pdf holdings <DOI> --json` when a holdings DB is configured, and do not confuse
+   missing coverage with a broken publisher route. Read
+   [references/publisher-routes.md](references/publisher-routes.md) for publisher dispatch,
+   LWW/Ovid, entitlement, and route-health diagnostics.
 7. If all automatic routes fail, return `resolver_url` for manual completion. Do not add an
    unauthorized fallback.
 8. Report the winning `layer`, `route`, output path, byte count, hash, and relevant failed
@@ -61,6 +65,10 @@ CLI succeeds but the website appears not to provide a file, verify the result pa
 - Never place passwords in `.env`; never commit `.env`, `config.yaml`, `*.dpapi`, browser
   profiles, or `access_log.jsonl`.
 - Stop on publisher/library warnings or suspected systematic-download blocks.
+- Keep CAPTCHA, OpenAthens/Shibboleth SSO, and MFA interactive. Plain form login may read the
+  user's own credentials from the ignored environment, but never from command arguments.
+- Treat Ovid E3 as an occupied licence seat and honor the enforced cooldown; never retry it
+  as if it were a normal HTTP failure.
 
 ## Commands
 
@@ -68,12 +76,23 @@ CLI succeeds but the website appears not to provide a file, verify the result pa
 doi2pdf doctor --json
 doi2pdf api-check --json
 doi2pdf acceptance --json
+doi2pdf routes --json
+doi2pdf holdings 10.1056/NEJMoa2404512 --json
 doi2pdf resolve "https://doi.org/10.1186/s12984-023-01168-x" --json
 doi2pdf fetch 10.1186/s12984-023-01168-x --no-institution --json
 doi2pdf login --json
 doi2pdf fetch 10.1002/example --zotero-key 9ET75JMH --author Chen --year 2026 --json
 doi2pdf batch-zotero --db "$HOME\Zotero\zotero.sqlite" --limit 10 --json
+doi2pdf batch-zotero --db "$HOME\Zotero\zotero.sqlite" --limit 10 --resume --json
+doi2pdf manual-review --output failed_manual_review.html --json
+doi2pdf zotero-attach --db "$HOME\Zotero\zotero.sqlite" --log playwright-profile/batch_log.jsonl --json
 ```
+
+Batch runs write a sanitized profile-local JSONL journal. Use `--resume` to skip all previously
+attempted items or add `--retry-failed` to retry failures. For Zotero attachment writes, first
+inspect the default dry-run result. Only use `--write --yes` after the user has authorized the
+write and Zotero is closed; the command makes a timestamped database backup and creates linked
+attachments rather than copying files into Zotero storage.
 
 Treat exit `2` as invalid input/setup, `3` as no automatic PDF/manual completion, `4` as
 human login required, and `5` as an unexpected runtime failure. Always inspect `status` and

@@ -4,6 +4,7 @@ from doi2pdf.config import Settings
 from doi2pdf.http import PDF_MAGIC
 from doi2pdf.models import Candidate
 from doi2pdf.pipeline import DOI2PDF
+from doi2pdf.institution import InstitutionResult
 
 
 PDF = PDF_MAGIC + b" test\n" + b"0" * 2048
@@ -68,3 +69,13 @@ def test_manual_resolver_completes_progress(tmp_path: Path):
     app.fetch("10.1234/example", tmp_path / "paper.pdf", use_institution=False, progress=events.append)
     assert events[-1]["stage"] == "resolver"
     assert events[-1]["status"] == "manual_required"
+
+
+def test_institution_route_and_entitlement_are_preserved(tmp_path: Path):
+    app = DOI2PDF(Settings(translator_enabled=False), http=FakeHttp())
+    app.oa.candidates = lambda doi: ([], [])
+    app.tdm.routes = lambda doi: (_ for _ in ())
+    app.institution.fetch = lambda doi: InstitutionResult(PDF, "openathens:nejm:tpl", "pdf", {"subscribed": True, "covered": True})
+    result = app.fetch("10.1056/NEJMoa1", tmp_path / "paper.pdf")
+    assert result.ok and result.route == "openathens:nejm:tpl"
+    assert result.metadata["entitlement"]["covered"] is True

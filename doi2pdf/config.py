@@ -29,7 +29,16 @@ class Settings:
     translator_enabled: bool = True
     openathens_redirector_prefix: str = ""
     ezproxy_prefix: str = ""
+    ezproxy_suffix: str = ""
+    library_login_url: str = ""
+    library_username: str = ""
+    library_password: str = ""
+    library_user_selector: str = "input[name='user'],#id_username"
+    library_password_selector: str = "input[name='pass'],#id_password"
+    library_submit_selector: str = "form button[type='submit'],form input[type='submit']"
     resolver_template: str = ""
+    paper_radar_db: Path | None = None
+    holdings_db: Path | None = None
     download_dir: Path = field(default_factory=lambda: Path("downloads"))
     setup_complete: bool = False
     browser_profile: Path = field(default_factory=lambda: Path.home() / ".doi2pdf" / "browser")
@@ -60,7 +69,16 @@ class Settings:
             translator_enabled=_bool("DOI2PDF_TRANSLATOR_ENABLED", True),
             openathens_redirector_prefix=os.getenv("OPENATHENS_REDIRECTOR_PREFIX", ""),
             ezproxy_prefix=os.getenv("EZPROXY_PREFIX", ""),
+            ezproxy_suffix=os.getenv("EZPROXY_SUFFIX", ""),
+            library_login_url=os.getenv("LIBRARY_LOGIN_URL", ""),
+            library_username=os.getenv("LIBRARY_USERNAME", ""),
+            library_password=os.getenv("LIBRARY_PASSWORD", ""),
+            library_user_selector=os.getenv("LIBRARY_USER_SELECTOR", "input[name='user'],#id_username"),
+            library_password_selector=os.getenv("LIBRARY_PASSWORD_SELECTOR", "input[name='pass'],#id_password"),
+            library_submit_selector=os.getenv("LIBRARY_SUBMIT_SELECTOR", "form button[type='submit'],form input[type='submit']"),
             resolver_template=os.getenv("LIBRARY_RESOLVER_TEMPLATE", ""),
+            paper_radar_db=Path(value) if (value := os.getenv("PAPER_RADAR_DB", "")) else None,
+            holdings_db=Path(value) if (value := os.getenv("HOLDINGS_DB", "")) else None,
             download_dir=Path(os.getenv("DOWNLOAD_DIR", "downloads")),
             setup_complete=_bool("DOI2PDF_SETUP_COMPLETE", False),
             browser_profile=Path(os.getenv("DOI2PDF_BROWSER_PROFILE", str(Path.home() / ".doi2pdf" / "browser"))),
@@ -92,6 +110,12 @@ class Settings:
                 issues.append(f"{name} must start with https://")
         if self.openathens_redirector_prefix and "url=" not in self.openathens_redirector_prefix:
             issues.append("OPENATHENS_REDIRECTOR_PREFIX should end with ?url= or &url=.")
+        if self.ezproxy_suffix and any(part in self.ezproxy_suffix for part in ("/", "?", "#")):
+            issues.append("EZPROXY_SUFFIX must be only a host or host:port, without a URL path.")
+        if self.library_login_url and not self.library_login_url.startswith("https://"):
+            issues.append("LIBRARY_LOGIN_URL must start with https://")
+        if bool(self.library_username) != bool(self.library_password):
+            issues.append("LIBRARY_USERNAME and LIBRARY_PASSWORD must be configured together.")
         if self.resolver_template and "{doi}" not in self.resolver_template:
             issues.append("LIBRARY_RESOLVER_TEMPLATE must contain {doi}.")
         return issues

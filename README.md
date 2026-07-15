@@ -3,6 +3,9 @@
 DOI2PDF combines Zotero PDF Hunter, the lawful route ladder from paper-fetch, and Zotero
 translation-server metadata into one provenance-aware tool.
 
+The audited upstream-to-DOI2PDF function checklist is maintained in
+[docs/PAPER_FETCH_INTEGRATION.md](docs/PAPER_FETCH_INTEGRATION.md).
+
 It tries, in order:
 
 1. **Open access** — every Unpaywall OA location, Semantic Scholar `openAccessPdf`, every
@@ -17,6 +20,12 @@ It tries, in order:
 
 Every downloaded response is checked for a real `%PDF-` header and written atomically.
 The JSON result records every route and its provenance.
+
+The institutional layer includes the complete paper-fetch v1.0 publisher registry: direct
+PDF templates, `citation_pdf_url`, headed Cloudflare navigation, and the LWW/Ovid signed-URL
+plus OCE fallback. A read-only holdings SQLite check distinguishes missing entitlement from
+a broken route, while sanitized route-health counters expose blocks and subscribed prefixes
+that still lack a route.
 
 ## Coding-agent skill
 
@@ -45,6 +54,7 @@ The local-only console provides five operational views:
 - **Acceptance** offers 5–10 real publisher papers for deliberate, one-at-a-time tests with
   the user's own institutional access; it never launches a bulk run.
 - **Settings** manages environment configuration without rendering stored API-key values.
+- **Routes** displays all 23 publisher prefixes and sanitized local success/failure counts.
 
 Activity logs stay in memory and reset when the server restarts. They omit candidate URLs,
 request headers, cookies, local output paths, and API keys. At most two web retrieval jobs run
@@ -107,6 +117,13 @@ doi2pdf api-check --json
 doi2pdf acceptance --json
 doi2pdf acceptance --publisher Elsevier --json
 
+# Inspect the full publisher registry and sanitized route-health scorecard
+doi2pdf routes --json
+
+# Check article coverage or list subscribed platforms from HOLDINGS_DB
+doi2pdf holdings 10.1056/NEJMoa2404512 --json
+doi2pdf holdings --platforms --json
+
 # OA/TDM only
 doi2pdf --json fetch 10.1186/s12984-023-01168-x --no-institution
 
@@ -121,7 +138,21 @@ doi2pdf resolve "PMID:12345678"
 
 # Read-only Zotero scan; downloads missing PDFs with the legacy filename rule
 doi2pdf --json batch-zotero --db "$HOME\Zotero\zotero.sqlite" --limit 10
+
+# Resume a batch, make a local failure review page, then dry-run attachment import
+doi2pdf --json batch-zotero --db "$HOME\Zotero\zotero.sqlite" --limit 10 --resume
+doi2pdf --json manual-review --output failed_manual_review.html
+doi2pdf --json zotero-attach --db "$HOME\Zotero\zotero.sqlite" --log playwright-profile/batch_log.jsonl
+
+# Only after reviewing the dry run and closing Zotero
+doi2pdf --json zotero-attach --db "$HOME\Zotero\zotero.sqlite" --log playwright-profile/batch_log.jsonl --write --yes
 ```
+
+Every batch writes a sanitized, resumable JSONL journal inside the ignored browser profile.
+`--resume` skips prior successes and failures; add `--retry-failed` to retry failures while
+still skipping successes. `manual-review` converts the latest failures into a local HTML page.
+`zotero-attach` is dry-run by default, requires explicit `--write --yes`, refuses to write
+while Zotero is running, validates the PDF header, and creates a timestamped database backup.
 
 ## Live acceptance testing
 
@@ -162,6 +193,20 @@ https://go.openathens.net/redirector/YOUR-DOMAIN?url=
 Set it as `OPENATHENS_REDIRECTOR_PREFIX`, run `doi2pdf login`, and complete SSO/MFA in the
 visible Chromium window. For EZproxy, set your own library's login prefix or a template
 containing `{url}`. DOI2PDF never ships another institution's endpoints.
+
+Set `EZPROXY_SUFFIX` when your library uses rewritten publisher hosts such as
+`onlinelibrary-wiley-com.<your suffix>`; this enables the original publisher-specific route
+registry. Plain EZproxy/NetScaler login forms may optionally use `LIBRARY_LOGIN_URL`,
+`LIBRARY_USERNAME`, `LIBRARY_PASSWORD`, and CSS selectors stored only in the ignored `.env`.
+OpenAthens/Shibboleth, CAPTCHA, and MFA always remain interactive in visible Chromium.
+
+For entitlement diagnostics, point `HOLDINGS_DB` at a read-only SQLite database containing:
+
+```sql
+CREATE TABLE journals(title TEXT,publisher TEXT,issn_print TEXT,issn_e TEXT,is_free INT,coverage TEXT);
+```
+
+Use `PAPER_RADAR_DB` for the optional original `papers(doi, oa_pdf_url)` OA fallback.
 
 ## Exit codes
 

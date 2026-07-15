@@ -19,6 +19,7 @@ candidate URLs.
 | `S2_API_KEY` | Semantic Scholar quota | Optional |
 | `DOI2PDF_SETUP_COMPLETE` | First-run web wizard state | Written by UI |
 | `DOWNLOAD_DIR` | Default local PDF folder | Optional |
+| `PAPER_RADAR_DB` | Read-only `papers(doi, oa_pdf_url)` fallback | Optional |
 
 ## Official publisher TDM
 
@@ -50,10 +51,16 @@ process-separated from the Python client.
 
 - `OPENATHENS_REDIRECTOR_PREFIX`: organization-specific prefix ending in `?url=`.
 - `EZPROXY_PREFIX`: the user's library prefix, or a template containing `{url}`/`{doi}`.
+- `EZPROXY_SUFFIX`: organization-issued publisher-host suffix; enables all paper-fetch routes.
 - `LIBRARY_RESOLVER_TEMPLATE`: SFX/OpenURL string containing `{doi}`.
+- `HOLDINGS_DB`: read-only journal holdings SQLite used for entitlement/coverage checks.
+- `LIBRARY_LOGIN_URL`, `LIBRARY_USERNAME`, `LIBRARY_PASSWORD`: optional plain-form login.
+- `LIBRARY_USER_SELECTOR`, `LIBRARY_PASSWORD_SELECTOR`, `LIBRARY_SUBMIT_SELECTOR`: form CSS.
 - `DOI2PDF_BROWSER_PROFILE`: private persistent Chromium directory.
 - `DOI2PDF_BROWSER_HEADLESS=false`: retain for SSO/MFA unless explicitly safe to change.
 - `DOI2PDF_INSTITUTION_INTERVAL_S`: may increase, but code clamps it to at least 15.
 - `DOI2PDF_MAX_INSTITUTION_REQUESTS_PER_DAY`: may decrease, but code clamps it to 1–100.
 
-Do not copy another institution's endpoint. Do not store institutional passwords in config.
+Do not copy another institution's endpoint. Keep institutional passwords only in the ignored
+local environment; never render them or place them in command arguments. Do not automate
+CAPTCHA, OpenAthens/Shibboleth SSO, or MFA.

@@ -21,13 +21,15 @@ from .api_probe import probe_all
 from .config import Settings
 from .naming import build_pdf_path
 from .pipeline import DOI2PDF
+from .publisher_routes import ROUTES
+from .route_health import summary as route_health_summary
 
 
 app = FastAPI(title="DOI2PDF", version=__version__)
 ENV_PATH = Path(os.getenv("DOI2PDF_ENV_FILE", ".env"))
 SECRET_ENV_KEYS = {
     "PUBMED_API_KEY", "S2_API_KEY", "ELSEVIER_TDM_KEY", "ELSEVIER_INSTTOKEN",
-    "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
+    "WILEY_TDM_TOKEN", "SPRINGER_API_KEY", "LIBRARY_USERNAME", "LIBRARY_PASSWORD",
 }
 _FILES: dict[str, Path] = {}
 _JOBS: dict[str, dict[str, Any]] = {}
@@ -64,7 +66,7 @@ details{{margin-top:16px}} select{{width:100%;padding:11px;border:1px solid #aeb
 #working{{display:none;position:fixed;inset:0;background:#f6f8faf2;z-index:9;align-items:center;justify-content:center;text-align:center;padding:20px}} #working.show{{display:flex}} .spinner{{width:48px;height:48px;border:5px solid #dbe7f0;border-top-color:var(--blue);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 18px}} @keyframes spin{{to{{transform:rotate(360deg)}}}}
 .progress-track{{height:16px;background:#e1e8ee;border-radius:999px;overflow:hidden}} .progress-bar{{height:100%;width:0;background:var(--blue);transition:width .35s ease}}
 .log{{list-style:none;padding:0;margin:0;max-height:360px;overflow:auto}} .log li{{padding:9px 0;border-bottom:1px solid var(--line);font-family:ui-monospace,Consolas,monospace;font-size:.86rem}} .pill{{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--pale);font-size:.78rem}}
-</style></head><body><main><nav><a href="/">Fetch</a><a href="/acceptance">Acceptance</a><a href="/activity">Activity</a><a href="/configure">Settings</a><a href="/health">Health</a></nav>{body}</main></body></html>"""
+</style></head><body><main><nav><a href="/">Fetch</a><a href="/acceptance">Acceptance</a><a href="/routes">Routes</a><a href="/activity">Activity</a><a href="/configure">Settings</a><a href="/health">Health</a></nav>{body}</main></body></html>"""
 
 
 def _settings() -> Settings:
@@ -195,7 +197,7 @@ def _route_status(settings: Settings) -> str:
     entries = (
         ("Open access", bool(settings.unpaywall_email), "Unpaywall, OpenAlex, Europe PMC"),
         ("Publisher APIs", bool(settings.elsevier_api_key or settings.wiley_tdm_token or settings.springer_api_key), "Optional Elsevier, Wiley, Springer keys"),
-        ("Library access", bool(settings.openathens_redirector_prefix or settings.ezproxy_prefix), "Your OpenAthens or EZproxy"),
+        ("Library access", bool(settings.openathens_redirector_prefix or settings.ezproxy_prefix or settings.ezproxy_suffix), "Your OpenAthens or EZproxy"),
         ("Manual resolver", bool(settings.resolver_template), "SFX/OpenURL fallback"),
     )
     return '<div class="grid">' + "".join(
@@ -417,6 +419,21 @@ def acceptance() -> str:
 <section class="card"><p><strong>Interpretation:</strong> subscription cases test your authorized OpenAthens/EZproxy route. OA discovery-gap cases test whether metadata or publisher routes need improvement; they are not evidence of a paywall.</p></section>""")
 
 
+@app.get("/routes", response_class=HTMLResponse)
+def routes_page() -> str:
+    settings = _settings()
+    health = route_health_summary(settings.browser_profile / "access_log.jsonl")
+    counts = {row["prefix"]: row for row in health["routes"]}
+    rows = "".join(
+        f'<tr><td><code>{html.escape(prefix)}</code></td><td>{html.escape(spec.label)}</td>'
+        f'<td>{html.escape(spec.kind)}{" / headful" if spec.headful else ""}</td>'
+        f'<td>{counts[prefix]["pdf"]}</td><td>{counts[prefix]["failures"]}</td></tr>'
+        for prefix, spec in sorted(ROUTES.items())
+    )
+    warning = '<p class="bad">Rate-limit or anti-bot blocks have been recorded. Stop institutional retrieval and inspect the log summary.</p>' if health["blocks"] else '<p class="ok">No rate-limit or anti-bot block is recorded.</p>'
+    return _layout("Routes", f'<h1>Publisher routes</h1><p class="muted">The complete paper-fetch publisher registry plus sanitized local success counts. No URLs, cookies, credentials, or signed links are displayed.</p><section class="card">{warning}<p>Route events: {health["route_events"]} · subscribed prefixes without a route: {html.escape(", ".join(health["subscribed_route_gaps"]) or "none")}</p><table><thead><tr><th>Prefix</th><th>Publisher</th><th>Method</th><th>PDF</th><th>Failures</th></tr></thead><tbody>{rows}</tbody></table></section>')
+
+
 @app.get("/configure", response_class=HTMLResponse)
 def configure() -> str:
     settings = _settings()
@@ -434,7 +451,17 @@ def configure() -> str:
 {_secret_field("Springer API key", "SPRINGER_API_KEY", bool(settings.springer_api_key))}
 <label>OpenAthens redirector prefix</label><input name="OPENATHENS_REDIRECTOR_PREFIX" value="{html.escape(settings.openathens_redirector_prefix, quote=True)}" placeholder="https://go.openathens.net/redirector/YOUR-DOMAIN?url=">
 <label>EZproxy prefix/template</label><input name="EZPROXY_PREFIX" value="{html.escape(settings.ezproxy_prefix, quote=True)}">
+<label>EZproxy publisher-host suffix</label><input name="EZPROXY_SUFFIX" value="{html.escape(settings.ezproxy_suffix, quote=True)}" placeholder="ezproxy.example.edu"><p class="muted">Optional. Enables the original publisher-specific template, metadata, and LWW/Ovid routes.</p>
+<details><summary>Optional EZproxy/NetScaler form login</summary><p class="muted">For a plain login form only. OpenAthens, Shibboleth, CAPTCHA, and MFA remain an interactive visible-browser step.</p>
+<label>Login URL</label><input name="LIBRARY_LOGIN_URL" value="{html.escape(settings.library_login_url, quote=True)}" placeholder="https://login.example.edu/login">
+{_secret_field("Library username", "LIBRARY_USERNAME", bool(settings.library_username))}
+{_secret_field("Library password", "LIBRARY_PASSWORD", bool(settings.library_password))}
+<label>Username CSS selector</label><input name="LIBRARY_USER_SELECTOR" value="{html.escape(settings.library_user_selector, quote=True)}">
+<label>Password CSS selector</label><input name="LIBRARY_PASSWORD_SELECTOR" value="{html.escape(settings.library_password_selector, quote=True)}">
+<label>Submit CSS selector</label><input name="LIBRARY_SUBMIT_SELECTOR" value="{html.escape(settings.library_submit_selector, quote=True)}"></details>
 <label>Library resolver template</label><input name="LIBRARY_RESOLVER_TEMPLATE" value="{html.escape(settings.resolver_template, quote=True)}" placeholder="https://resolver.example/openurl?doi={{doi}}">
+<label>Holdings SQLite path</label><input name="HOLDINGS_DB" value="{html.escape(str(settings.holdings_db or ''), quote=True)}" placeholder="C:\\path\\holdings.sqlite">
+<label>paper-radar SQLite path</label><input name="PAPER_RADAR_DB" value="{html.escape(str(settings.paper_radar_db or ''), quote=True)}" placeholder="C:\\path\\papers.sqlite">
 <button type="submit">Save settings</button></form></section>
 <section class="card"><h2>API connectivity</h2><p>Send one small real request to each configured provider. Results show only provider, status, and HTTP code; keys are never returned.</p><form method="post" action="/api-check"><button class="secondary" type="submit">Test configured API keys</button></form></section>
 <section class="card"><h2>Institutional session</h2><p>After saving your own OpenAthens or EZproxy prefix, open the persistent Chromium login. Complete SSO/MFA in Chromium, then return to the DOI2PDF launcher window and press Enter.</p><form method="post" action="/institution-login"><button class="secondary" type="submit">Open institutional login</button></form></section>""")
@@ -445,16 +472,24 @@ async def save_configuration(request: Request):
     allowed = {
         "DOI2PDF_CONTACT_EMAIL", "UNPAYWALL_EMAIL", "DOWNLOAD_DIR", "PUBMED_API_KEY", "S2_API_KEY",
         "ELSEVIER_TDM_KEY", "ELSEVIER_INSTTOKEN", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
-        "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "LIBRARY_RESOLVER_TEMPLATE",
+        "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "EZPROXY_SUFFIX", "LIBRARY_RESOLVER_TEMPLATE",
+        "HOLDINGS_DB", "PAPER_RADAR_DB",
+        "LIBRARY_LOGIN_URL", "LIBRARY_USERNAME", "LIBRARY_PASSWORD", "LIBRARY_USER_SELECTOR",
+        "LIBRARY_PASSWORD_SELECTOR", "LIBRARY_SUBMIT_SELECTOR",
     }
     form = _parse_body(await request.body())
     updates = {key: value.strip() for key, value in form.items() if key in allowed}
+    current = _settings()
     candidate = Settings(
         contact_email=updates.get("DOI2PDF_CONTACT_EMAIL", ""),
         unpaywall_email=updates.get("UNPAYWALL_EMAIL", ""),
         setup_complete=True,
         openathens_redirector_prefix=updates.get("OPENATHENS_REDIRECTOR_PREFIX", ""),
         ezproxy_prefix=updates.get("EZPROXY_PREFIX", ""),
+        ezproxy_suffix=updates.get("EZPROXY_SUFFIX", ""),
+        library_login_url=updates.get("LIBRARY_LOGIN_URL", ""),
+        library_username=updates.get("LIBRARY_USERNAME") or current.library_username,
+        library_password=updates.get("LIBRARY_PASSWORD") or current.library_password,
         resolver_template=updates.get("LIBRARY_RESOLVER_TEMPLATE", ""),
     )
     if candidate.validate():
@@ -492,6 +527,7 @@ def health() -> JSONResponse:
     with _JOB_LOCK:
         active_jobs = sum(job["state"] in {"queued", "running"} for job in _JOBS.values())
         recent_jobs = len(_JOBS)
+    route_health = route_health_summary(settings.browser_profile / "access_log.jsonl")
     return JSONResponse({
         "ok": not settings.needs_setup(), "version": __version__, "issues": settings.validate(),
         "setup_complete": not settings.needs_setup(),
@@ -500,9 +536,12 @@ def health() -> JSONResponse:
             "unpaywall": bool(settings.unpaywall_email),
             "zotero_translation_server": settings.translator_enabled,
             "openathens": bool(settings.openathens_redirector_prefix),
-            "ezproxy": bool(settings.ezproxy_prefix),
+            "ezproxy": bool(settings.ezproxy_prefix or settings.ezproxy_suffix),
+            "ezproxy_suffix": bool(settings.ezproxy_suffix),
             "resolver": bool(settings.resolver_template),
+            "holdings": bool(settings.holdings_db and settings.holdings_db.is_file()),
         },
+        "route_health": {key: route_health[key] for key in ("route_events", "statuses", "blocks", "subscribed_route_gaps")},
     })
 
 
