@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import Settings
-from .http import HttpClient, atomic_write_pdf
+from .http import HttpClient, atomic_write_pdf, build_retry_session
 from .institution import InstitutionalBrowser, ProfileBusy
 from .models import Attempt, Candidate, FetchResult
 from .normalize import normalize_doi
@@ -25,10 +25,16 @@ class DOI2PDF:
         )
         self.oa = OpenAccessResolver(self.settings, self.http)
         self.identifiers = IdentifierResolver(self.settings, self.http)
-        # Reusing HttpClient's session gives tdm/translator the same connection
-        # pool, User-Agent, and retry adapter as the rest of the fetch pipeline.
+        # Reusing HttpClient's session gives tdm the same connection pool,
+        # User-Agent, retry adapter, and SSRF guard as the rest of the pipeline
+        # (publisher TDM hosts are fixed, known-good, always-public endpoints).
         self.tdm = TDMResolver(self.settings, session=self.http.session)
-        self.translator = ZoteroTranslatorClient(self.settings, session=self.http.session)
+        # The translation-server is a separate, user-configured process that the
+        # README explicitly directs users to run on loopback — it needs its own
+        # retrying session *without* the SSRF guard, not HttpClient's, or every
+        # request to it would be refused as a "private host".
+        translator_session = build_retry_session(self.settings.http_max_retries, block_private_hosts=False)
+        self.translator = ZoteroTranslatorClient(self.settings, session=translator_session)
         self.institution = InstitutionalBrowser(self.settings)
 
     def fetch(

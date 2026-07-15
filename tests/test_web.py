@@ -18,6 +18,16 @@ def test_home_has_retrieval_form(monkeypatch):
     assert 'href="/activity"' in page
 
 
+def test_home_discloses_terms_of_service_risk(monkeypatch):
+    monkeypatch.setattr(web, "_settings", lambda: web.Settings(contact_email="doctor@hospital.org", setup_complete=True))
+    assert "terms of service" in web.home()
+
+
+def test_configure_discloses_terms_of_service_risk(monkeypatch):
+    monkeypatch.setattr(web, "_settings", lambda: web.Settings(contact_email="a@example.org", setup_complete=True))
+    assert "terms of service" in web.configure()
+
+
 def test_first_run_redirects_to_guided_setup(monkeypatch):
     monkeypatch.setattr(web, "_settings", lambda: web.Settings(contact_email="you@example.org"))
     response = web.home()

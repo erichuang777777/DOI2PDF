@@ -83,7 +83,37 @@ def test_institution_route_and_entitlement_are_preserved(tmp_path: Path):
     assert result.metadata["entitlement"]["covered"] is True
 
 
-def test_tdm_and_translator_share_the_http_client_session():
+def test_tdm_shares_the_http_client_session():
     app = DOI2PDF(Settings(translator_enabled=False))
     assert app.tdm.session is app.http.session
-    assert app.translator.session is app.http.session
+
+
+def test_translator_gets_its_own_session_without_the_ssrf_guard(tmp_path: Path):
+    # The translation-server is user-configured and typically loopback (see
+    # README); it must not inherit HttpClient's SSRF guard, which would refuse
+    # every request to it as a "private host".
+    import http.server
+    import socketserver
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = b"[]"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format, *args):
+            pass
+
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        settings = Settings(translator_url=f"http://127.0.0.1:{server.server_address[1]}")
+        app = DOI2PDF(settings)
+        assert app.translator.session is not app.http.session
+        assert app.translator.search("10.1234/example") == []
+    finally:
+        server.shutdown()

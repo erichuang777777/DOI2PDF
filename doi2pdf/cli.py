@@ -279,8 +279,15 @@ def main(argv: list[str] | None = None) -> int:
         outcomes = []
         log_path = args.log or settings.browser_profile / "batch_log.jsonl"
         already_tried = attempted_keys(log_path, retry_failed=args.retry_failed) if args.resume else set()
+        items = ZoteroLibrary(db).missing_pdfs(args.limit)
+        # OpenAlex is the only OA index with a free multi-DOI batch endpoint;
+        # warming its cache for the whole batch up front turns N per-DOI
+        # requests into a handful of chunked ones. Unpaywall and the other
+        # sources still query one DOI at a time inside app.fetch().
+        pending_dois = [item["doi"] for item in items if item["doi"] and item["key"] not in already_tried]
+        app.oa.prefetch_openalex_batch(pending_dois)
         skipped = 0
-        for item in ZoteroLibrary(db).missing_pdfs(args.limit):
+        for item in items:
             if item["key"] in already_tried:
                 skipped += 1
                 continue

@@ -27,6 +27,7 @@ class OpenAccessResolver:
         self.http = http
         self._pmcid_cache: dict[str, str | None] = {}
         self._pmcid_lock = threading.Lock()
+        self._openalex_batch_cache: dict[str, list[Candidate]] = {}
 
     def unpaywall(self, doi: str) -> list[Candidate]:
         if not self.settings.unpaywall_email:
@@ -59,15 +60,15 @@ class OpenAccessResolver:
         oa = data.get("openAccessPdf") or {}
         return [Candidate(oa["url"], "semantic_scholar", "open_access")] if oa.get("url") else []
 
-    def openalex(self, doi: str) -> list[Candidate]:
-        data = self.http.get_json(f"https://api.openalex.org/works/https://doi.org/{quote(doi, safe='/')}")
+    @staticmethod
+    def _openalex_work_candidates(work: dict) -> list[Candidate]:
         locations = []
-        best = data.get("best_oa_location")
+        best = work.get("best_oa_location")
         if best:
             locations.append(best)
         # OpenAlex `locations` also contains non-OA holdings. Only take entries it
         # explicitly marks OA; otherwise provenance would be mislabeled.
-        locations.extend(location for location in (data.get("locations") or []) if location.get("is_oa") is True)
+        locations.extend(location for location in (work.get("locations") or []) if location.get("is_oa") is True)
         candidates: list[Candidate] = []
         for location in locations:
             if location.get("pdf_url"):
@@ -75,6 +76,44 @@ class OpenAccessResolver:
             if location.get("landing_page_url"):
                 candidates.append(Candidate(location["landing_page_url"], "openalex", "open_access", "landing"))
         return _unique(candidates)
+
+    def openalex(self, doi: str) -> list[Candidate]:
+        cached = self._openalex_batch_cache.get(doi.lower())
+        if cached is not None:
+            return cached
+        data = self.http.get_json(f"https://api.openalex.org/works/https://doi.org/{quote(doi, safe='/')}")
+        return self._openalex_work_candidates(data)
+
+    def prefetch_openalex_batch(self, dois: list[str], chunk_size: int = 25) -> None:
+        """Warm the OpenAlex cache for a whole batch of DOIs up front using
+        OpenAlex's filter-based multi-ID endpoint, instead of one request per DOI.
+
+        Only OpenAlex offers a free multi-DOI batch lookup; Unpaywall, Semantic
+        Scholar, Crossref, and the other sources here don't, so batch mode still
+        queries those one DOI at a time. Call this once before fetching a batch
+        (e.g. `batch-zotero`); openalex() then serves cached results instead of
+        making its own request for every DOI it already covers.
+        """
+        unique = [doi.lower() for doi in dict.fromkeys(dois) if doi]
+        for start in range(0, len(unique), chunk_size):
+            chunk = unique[start:start + chunk_size]
+            filter_value = "|".join(quote(doi, safe="") for doi in chunk)
+            try:
+                data = self.http.get_json(
+                    "https://api.openalex.org/works",
+                    params={"filter": f"doi:{filter_value}", "per_page": chunk_size},
+                )
+            except Exception:
+                continue  # a failed prefetch just means this chunk falls back to per-DOI queries
+            for work in data.get("results") or []:
+                raw_doi = (work.get("doi") or "").removeprefix("https://doi.org/").lower()
+                if raw_doi:
+                    self._openalex_batch_cache[raw_doi] = self._openalex_work_candidates(work)
+            for doi in chunk:
+                # A DOI absent from the response (e.g. not indexed by OpenAlex)
+                # must still be cached as "no candidates" so openalex() doesn't
+                # re-query it individually.
+                self._openalex_batch_cache.setdefault(doi, [])
 
     def _pmcid(self, doi: str) -> str | None:
         """Resolve a DOI to a PMCID via NCBI idconv, cached per instance.

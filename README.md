@@ -21,7 +21,9 @@ It tries, in order:
 4. **Library resolver** — prints the configured SFX/OpenURL link for manual completion.
 
 Every downloaded response is checked for a real `%PDF-` header and written atomically.
-The JSON result records every route and its provenance.
+The JSON result records every route and its provenance. OA/TDM requests refuse to connect
+to a private, loopback, or link-local address (checked on every redirect hop, not just the
+first), since candidate URLs originate from external indexes.
 
 The institutional layer includes the complete paper-fetch v1.0 publisher registry: direct
 PDF templates, `citation_pdf_url`, headed Cloudflare navigation, and the LWW/Ovid signed-URL
@@ -160,6 +162,9 @@ doi2pdf --json zotero-attach --db "$HOME\Zotero\zotero.sqlite" --log playwright-
 Every batch writes a sanitized, resumable JSONL journal inside the ignored browser profile.
 `--resume` skips prior successes and failures; add `--retry-failed` to retry failures while
 still skipping successes. `manual-review` converts the latest failures into a local HTML page.
+`batch-zotero` warms OpenAlex's cache for the whole batch up front using its free multi-DOI
+filter endpoint, instead of one OpenAlex request per item; other OA sources have no free
+batch endpoint and are still queried per DOI.
 `zotero-attach` is dry-run by default, requires explicit `--write --yes`, refuses to write
 while Zotero is running, validates the PDF header, and creates a timestamped database backup.
 
