@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doi2pdf"
-version = "0.5.0"
+version = "0.6.0"
 description = "Lawful DOI-to-PDF retrieval through OA, publisher TDM, institutional access, and library resolvers"
 readme = "README.md"
 license = "AGPL-3.0-or-later"

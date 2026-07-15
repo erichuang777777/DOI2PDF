@@ -74,3 +74,56 @@ def test_placeholder_email_requires_first_run_setup():
 def test_library_login_must_be_https():
     settings = Settings(contact_email="a@example.org", library_login_url="http://login.example.org")
     assert "LIBRARY_LOGIN_URL must start with https://" in settings.validate()
+
+
+def test_validated_learned_selector_is_reused_and_promoted(tmp_path):
+    class Response:
+        status = 200
+        url = "https://publisher.example/paper.pdf"
+
+        @staticmethod
+        def body():
+            return b"%PDF-1.7\n" + b"x" * 1200
+
+    class Request:
+        @staticmethod
+        def get(*args, **kwargs):
+            return Response()
+
+    class Context:
+        request = Request()
+
+    class Locator:
+        @staticmethod
+        def count():
+            return 1
+
+        @staticmethod
+        def get_attribute(name):
+            return "/paper.pdf" if name == "href" else None
+
+    class Page:
+        url = "https://publisher.example/article"
+
+        @staticmethod
+        def wait_for_timeout(value):
+            pass
+
+        @staticmethod
+        def locator(selector):
+            class First:
+                first = Locator()
+            return First()
+
+    browser = InstitutionalBrowser(Settings(browser_profile=tmp_path))
+    browser.rules.remember("publisher.example", "#download", source="llm")
+    content, status = browser._generic_or_meta(Page(), Context(), [], "10.1/example", None)
+    assert content.startswith(b"%PDF-") and status == "pdf_learned_rule"
+    assert browser.rules.list()[0]["status"] == "verified"
+
+
+def test_llm_endpoint_requires_https_or_loopback():
+    settings = Settings(llm_enabled=True, llm_base_url="http://remote.example/v1", llm_model="ranker")
+    assert any("HTTPS or a loopback" in issue for issue in settings.validate())
+    embedded = Settings(llm_enabled=True, llm_base_url="https://llm.example/v1?token=secret", llm_model="ranker")
+    assert any("cannot contain credentials" in issue for issue in embedded.validate())

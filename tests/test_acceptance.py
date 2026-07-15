@@ -14,5 +14,5 @@ def test_live_corpus_is_small_varied_and_not_a_bulk_fixture():
 
 def test_unconfigured_api_probe_requires_no_mock_or_network():
     rows = probe_all(Settings())
-    assert len(rows) == 5
+    assert len(rows) == 6
     assert all(not row["configured"] and row["status"] == "not_configured" for row in rows)

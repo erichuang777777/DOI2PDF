@@ -20,6 +20,7 @@ from .acceptance import corpus
 from .api_probe import probe_all
 from .config import Settings
 from .naming import build_pdf_path
+from .learned_rules import RuleStore
 from .pipeline import DOI2PDF
 from .publisher_routes import ROUTES
 from .route_health import summary as route_health_summary
@@ -30,6 +31,7 @@ ENV_PATH = Path(os.getenv("DOI2PDF_ENV_FILE", ".env"))
 SECRET_ENV_KEYS = {
     "PUBMED_API_KEY", "S2_API_KEY", "ELSEVIER_TDM_KEY", "ELSEVIER_INSTTOKEN",
     "WILEY_TDM_TOKEN", "SPRINGER_API_KEY", "LIBRARY_USERNAME", "LIBRARY_PASSWORD",
+    "DOI2PDF_LLM_API_KEY",
 }
 _FILES: dict[str, Path] = {}
 _JOBS: dict[str, dict[str, Any]] = {}
@@ -66,7 +68,7 @@ details{{margin-top:16px}} select{{width:100%;padding:11px;border:1px solid #aeb
 #working{{display:none;position:fixed;inset:0;background:#f6f8faf2;z-index:9;align-items:center;justify-content:center;text-align:center;padding:20px}} #working.show{{display:flex}} .spinner{{width:48px;height:48px;border:5px solid #dbe7f0;border-top-color:var(--blue);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 18px}} @keyframes spin{{to{{transform:rotate(360deg)}}}}
 .progress-track{{height:16px;background:#e1e8ee;border-radius:999px;overflow:hidden}} .progress-bar{{height:100%;width:0;background:var(--blue);transition:width .35s ease}}
 .log{{list-style:none;padding:0;margin:0;max-height:360px;overflow:auto}} .log li{{padding:9px 0;border-bottom:1px solid var(--line);font-family:ui-monospace,Consolas,monospace;font-size:.86rem}} .pill{{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--pale);font-size:.78rem}}
-</style></head><body><main><nav><a href="/">Fetch</a><a href="/acceptance">Acceptance</a><a href="/routes">Routes</a><a href="/activity">Activity</a><a href="/configure">Settings</a><a href="/health">Health</a></nav>{body}</main></body></html>"""
+</style></head><body><main><nav><a href="/">Fetch</a><a href="/acceptance">Acceptance</a><a href="/routes">Routes</a><a href="/rules">Learned rules</a><a href="/activity">Activity</a><a href="/configure">Settings</a><a href="/health">Health</a></nav>{body}</main></body></html>"""
 
 
 def _settings() -> Settings:
@@ -434,6 +436,31 @@ def routes_page() -> str:
     return _layout("Routes", f'<h1>Publisher routes</h1><p class="muted">The complete paper-fetch publisher registry plus sanitized local success counts. No URLs, cookies, credentials, or signed links are displayed.</p><section class="card">{warning}<p>Route events: {health["route_events"]} · subscribed prefixes without a route: {html.escape(", ".join(health["subscribed_route_gaps"]) or "none")}</p><table><thead><tr><th>Prefix</th><th>Publisher</th><th>Method</th><th>PDF</th><th>Failures</th></tr></thead><tbody>{rows}</tbody></table></section>')
 
 
+@app.get("/rules", response_class=HTMLResponse)
+def learned_rules_page() -> str:
+    settings = _settings()
+    rules = RuleStore(settings.browser_profile / "learned_pdf_rules.json").list()
+    rows = "".join(
+        f'<tr><td>{html.escape(row["host"])}</td><td><code>{html.escape(row["selector"])}</code></td>'
+        f'<td>{html.escape(row.get("source", ""))}</td><td>{html.escape(row.get("status", ""))}</td>'
+        f'<td>{int(row.get("successes", 0))} / {int(row.get("failures", 0))}</td><td>'
+        f'<form method="post" action="/rules/forget"><input type="hidden" name="host" value="{html.escape(row["host"], quote=True)}">'
+        '<button class="secondary" type="submit">Forget host</button></form></td></tr>' for row in rules
+    )
+    empty = '<p class="muted">No learned selectors yet. A rule appears only after a candidate downloads a validated PDF.</p>' if not rules else ""
+    return _layout("Learned rules", f'<h1>Learned PDF rules</h1><p class="muted">Only hostnames and reusable selectors are stored. Signed URLs, query strings, cookies, credentials, and page HTML are never retained.</p><section class="card">{empty}<table><thead><tr><th>Host</th><th>Selector</th><th>Source</th><th>Status</th><th>Success / failure</th><th></th></tr></thead><tbody>{rows}</tbody></table></section>')
+
+
+@app.post("/rules/forget")
+async def forget_learned_rules(request: Request):
+    host = _parse_body(await request.body()).get("host", "")
+    try:
+        RuleStore(_settings().browser_profile / "learned_pdf_rules.json").forget(host)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse("/rules", status_code=303)
+
+
 @app.get("/configure", response_class=HTMLResponse)
 def configure() -> str:
     settings = _settings()
@@ -449,6 +476,11 @@ def configure() -> str:
 {_secret_field("Elsevier institution token", "ELSEVIER_INSTTOKEN", bool(settings.elsevier_insttoken))}
 {_secret_field("Wiley TDM token", "WILEY_TDM_TOKEN", bool(settings.wiley_tdm_token))}
 {_secret_field("Springer API key", "SPRINGER_API_KEY", bool(settings.springer_api_key))}
+<details><summary>Optional LLM-assisted PDF link ranking</summary><p class="muted">The LLM receives only publisher hostname, candidate text, ARIA labels, and URL paths without query strings. It never receives cookies, credentials, signed URLs, or full page HTML.</p>
+<input type="hidden" name="DOI2PDF_LLM_ENABLED" value="false"><label class="check"><input type="checkbox" name="DOI2PDF_LLM_ENABLED" value="true" {"checked" if settings.llm_enabled else ""}> Enable LLM candidate ranking</label>
+<label>OpenAI-compatible base URL</label><input name="DOI2PDF_LLM_BASE_URL" value="{html.escape(settings.llm_base_url, quote=True)}" placeholder="https://provider.example/v1 or http://127.0.0.1:11434/v1">
+<label>Model</label><input name="DOI2PDF_LLM_MODEL" value="{html.escape(settings.llm_model, quote=True)}">
+{_secret_field("LLM API key", "DOI2PDF_LLM_API_KEY", bool(settings.llm_api_key))}</details>
 <label>OpenAthens redirector prefix</label><input name="OPENATHENS_REDIRECTOR_PREFIX" value="{html.escape(settings.openathens_redirector_prefix, quote=True)}" placeholder="https://go.openathens.net/redirector/YOUR-DOMAIN?url=">
 <label>EZproxy prefix/template</label><input name="EZPROXY_PREFIX" value="{html.escape(settings.ezproxy_prefix, quote=True)}">
 <label>EZproxy publisher-host suffix</label><input name="EZPROXY_SUFFIX" value="{html.escape(settings.ezproxy_suffix, quote=True)}" placeholder="ezproxy.example.edu"><p class="muted">Optional. Enables the original publisher-specific template, metadata, and LWW/Ovid routes.</p>
@@ -476,6 +508,7 @@ async def save_configuration(request: Request):
         "HOLDINGS_DB", "PAPER_RADAR_DB",
         "LIBRARY_LOGIN_URL", "LIBRARY_USERNAME", "LIBRARY_PASSWORD", "LIBRARY_USER_SELECTOR",
         "LIBRARY_PASSWORD_SELECTOR", "LIBRARY_SUBMIT_SELECTOR",
+        "DOI2PDF_LLM_ENABLED", "DOI2PDF_LLM_BASE_URL", "DOI2PDF_LLM_MODEL", "DOI2PDF_LLM_API_KEY",
     }
     form = _parse_body(await request.body())
     updates = {key: value.strip() for key, value in form.items() if key in allowed}
@@ -491,6 +524,10 @@ async def save_configuration(request: Request):
         library_username=updates.get("LIBRARY_USERNAME") or current.library_username,
         library_password=updates.get("LIBRARY_PASSWORD") or current.library_password,
         resolver_template=updates.get("LIBRARY_RESOLVER_TEMPLATE", ""),
+        llm_enabled=updates.get("DOI2PDF_LLM_ENABLED", "false").lower() == "true",
+        llm_base_url=updates.get("DOI2PDF_LLM_BASE_URL", ""),
+        llm_model=updates.get("DOI2PDF_LLM_MODEL", ""),
+        llm_api_key=updates.get("DOI2PDF_LLM_API_KEY") or current.llm_api_key,
     )
     if candidate.validate():
         problems = "<br>".join(html.escape(issue) for issue in candidate.validate())
@@ -540,6 +577,8 @@ def health() -> JSONResponse:
             "ezproxy_suffix": bool(settings.ezproxy_suffix),
             "resolver": bool(settings.resolver_template),
             "holdings": bool(settings.holdings_db and settings.holdings_db.is_file()),
+            "llm_assisted_discovery": settings.llm_enabled,
+            "learned_rules": len(RuleStore(settings.browser_profile / "learned_pdf_rules.json").list()),
         },
         "route_health": {key: route_health[key] for key in ("route_events", "statuses", "blocks", "subscribed_route_gaps")},
     })

@@ -10,3 +10,9 @@ reverse proxy. Treat the Playwright profile and `.env` as private account materi
 The project supports only lawful access using public OA content, official publisher APIs,
 and the user's own institutional entitlement. Reports requesting paywall bypasses, CAPTCHA
 solving, shared credentials, or pirate-source integration are out of scope.
+
+Optional LLM ranking sends only sanitized candidate text, ARIA labels, publisher hostname,
+and URL paths without query strings. Use a provider whose data policy you accept, or a local
+loopback model. Never modify the ranker to send page HTML, cookies, headers, signed URLs,
+institutional identifiers, or credentials. LLM output is advisory and cannot bypass PDF
+validation, institutional rate limits, or interactive SSO/MFA.

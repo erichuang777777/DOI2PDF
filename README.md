@@ -55,6 +55,8 @@ The local-only console provides five operational views:
   the user's own institutional access; it never launches a bulk run.
 - **Settings** manages environment configuration without rendering stored API-key values.
 - **Routes** displays all 23 publisher prefixes and sanitized local success/failure counts.
+- **Learned rules** shows publisher selectors learned only after a validated PDF download and
+  lets the user forget a host without exposing signed URLs or session data.
 
 Activity logs stay in memory and reset when the server restarts. They omit candidate URLs,
 request headers, cookies, local output paths, and API keys. At most two web retrieval jobs run
@@ -119,6 +121,7 @@ doi2pdf acceptance --publisher Elsevier --json
 
 # Inspect the full publisher registry and sanitized route-health scorecard
 doi2pdf routes --json
+doi2pdf rules --json
 
 # Check article coverage or list subscribed platforms from HOLDINGS_DB
 doi2pdf holdings 10.1056/NEJMoa2404512 --json
@@ -153,6 +156,22 @@ Every batch writes a sanitized, resumable JSONL journal inside the ignored brows
 still skipping successes. `manual-review` converts the latest failures into a local HTML page.
 `zotero-attach` is dry-run by default, requires explicit `--write --yes`, refuses to write
 while Zotero is running, validates the PDF header, and creates a timestamped database backup.
+
+## LLM-assisted final-link discovery
+
+An optional final institutional step can ask an OpenAI-compatible model to rank sanitized
+PDF-link candidates found by Playwright. Enable it in **Settings** or configure
+`DOI2PDF_LLM_ENABLED`, `DOI2PDF_LLM_BASE_URL`, `DOI2PDF_LLM_MODEL`, and optionally
+`DOI2PDF_LLM_API_KEY`. Remote endpoints must use HTTPS; loopback HTTP is allowed for a local
+model. `doi2pdf api-check --provider llm --json` tests the configured endpoint.
+
+The model receives only publisher hostname, button/link text, ARIA label, and URL path. Query
+strings, page HTML, DOI, cookies, credentials, headers, and signed URLs are not sent. The model
+can rank a candidate but cannot declare success: DOI2PDF downloads it through the authorized
+session and requires `%PDF-` validation. Only then is its reusable selector written to the
+profile-local `learned_pdf_rules.json`. A rule is provisional after one success, verified after
+two, and automatically disabled after three consecutive failures. Inspect or remove rules with
+`doi2pdf rules --json` or the console's **Learned rules** page.
 
 ## Live acceptance testing
 

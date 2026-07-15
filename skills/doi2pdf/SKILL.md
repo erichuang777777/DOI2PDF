@@ -1,6 +1,6 @@
 ---
 name: doi2pdf
-description: "Fetch and verify academic PDFs from a DOI through lawful, provenance-aware layers: open access indexes and repositories, official publisher TDM APIs, the user's own OpenAthens/EZproxy institutional session, and a manual library resolver fallback. Use when Codex needs to download a paper, diagnose why a DOI has no automatic full text, initialize institutional login, preserve Zotero PDF naming, or report which access route succeeded. Also use for PMID-backed PMC lookups and Zotero translation-server attachment discovery. Never use it to bypass a paywall, solve CAPTCHAs, share credentials, or retrieve from pirate sources."
+description: "Fetch and verify academic PDFs from a DOI through lawful, provenance-aware layers: open access indexes and repositories, official publisher TDM APIs, the user's own OpenAthens/EZproxy institutional session, optional sanitized LLM-assisted Playwright link ranking with learned publisher selectors, and a manual library resolver fallback. Use when Codex needs to download a paper, diagnose why a DOI has no automatic full text, initialize institutional login, inspect or forget learned PDF rules, preserve Zotero PDF naming, or report which access route succeeded. Also use for PMID-backed PMC lookups and Zotero translation-server attachment discovery. Never use it to bypass a paywall, solve CAPTCHAs, share credentials, or retrieve from pirate sources."
 ---
 
 # DOI2PDF
@@ -33,9 +33,13 @@ out of prompts, command arguments, logs, and responses.
    missing coverage with a broken publisher route. Read
    [references/publisher-routes.md](references/publisher-routes.md) for publisher dispatch,
    LWW/Ovid, entitlement, and route-health diagnostics.
-7. If all automatic routes fail, return `resolver_url` for manual completion. Do not add an
+7. After ordinary publisher and translator routes, reuse verified publisher selectors. If the
+   user enabled LLM ranking, allow it to rank only sanitized Playwright candidates. It does not
+   authorize or validate a download. Remember a selector only after `%PDF-` validation; inspect
+   it with `doi2pdf rules --json`. Never retain a candidate URL or signed query string.
+8. If all automatic routes fail, return `resolver_url` for manual completion. Do not add an
    unauthorized fallback.
-8. Report the winning `layer`, `route`, output path, byte count, hash, and relevant failed
+9. Report the winning `layer`, `route`, output path, byte count, hash, and relevant failed
    route statuses. Never expose keys, cookies, headers, or credentials.
 
 For nontechnical local use, launch `DOI2PDF.bat`. Complete `/setup` on first run, retrieve
@@ -77,6 +81,7 @@ doi2pdf doctor --json
 doi2pdf api-check --json
 doi2pdf acceptance --json
 doi2pdf routes --json
+doi2pdf rules --json
 doi2pdf holdings 10.1056/NEJMoa2404512 --json
 doi2pdf resolve "https://doi.org/10.1186/s12984-023-01168-x" --json
 doi2pdf fetch 10.1186/s12984-023-01168-x --no-institution --json
@@ -94,6 +99,13 @@ inspect the default dry-run result. Only use `--write --yes` after the user has 
 write and Zotero is closed; the command makes a timestamped database backup and creates linked
 attachments rather than copying files into Zotero storage.
 
+Learned publisher rules are profile-local and sanitized. One validated success creates a
+`provisional` rule, two promote it to `verified`, and three consecutive failures disable it.
+Use `doi2pdf rules --forget HOST --yes --json` only when the user asks to remove that host's
+rules. Optional LLM ranking must use HTTPS except for loopback local models; it receives only
+hostname, candidate text/ARIA, and URL paths with query strings removed. The deterministic
+fallback and PDF validation remain mandatory.
+
 Treat exit `2` as invalid input/setup, `3` as no automatic PDF/manual completion, `4` as
 human login required, and `5` as an unexpected runtime failure. Always inspect `status` and
 `resolver_url` in the JSON envelope before deciding the next action.
@@ -104,4 +116,4 @@ dated failures from several publishers and offers only one-at-a-time retrieval. 
 it into a bulk downloader. Keep OA discovery-gap cases distinct from subscription controls.
 
 Read [references/configuration.md](references/configuration.md) when configuring API keys,
-Zotero translation-server, OpenAthens, EZproxy, or resolver templates.
+LLM ranking, Zotero translation-server, OpenAthens, EZproxy, or resolver templates.

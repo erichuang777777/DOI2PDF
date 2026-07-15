@@ -54,7 +54,7 @@ def test_api_check_without_keys_is_explicit_and_does_not_call_network(capsys, mo
     assert cli.main(["api-check", "--json"]) == cli.EXIT_INPUT_OR_CONFIG
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "no_keys_configured"
-    assert len(payload["results"]) == 5
+    assert len(payload["results"]) == 6
     assert {row["status"] for row in payload["results"]} == {"not_configured"}
 
 
@@ -71,6 +71,19 @@ def test_holdings_command_explains_missing_database(capsys, monkeypatch):
     assert cli.main(["holdings", "10.1234/example", "--json"]) == cli.EXIT_INPUT_OR_CONFIG
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "not_configured"
+
+
+def test_rules_command_lists_and_guards_forget(capsys, monkeypatch, tmp_path):
+    settings = Settings(browser_profile=tmp_path)
+    monkeypatch.setattr(cli.Settings, "from_env", lambda: settings)
+    cli.RuleStore(tmp_path / "learned_pdf_rules.json").remember("publisher.example", "#pdf")
+    assert cli.main(["rules", "--json"]) == cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["count"] == 1 and payload["rules"][0]["host"] == "publisher.example"
+    assert cli.main(["rules", "--forget", "publisher.example", "--json"]) == cli.EXIT_INPUT_OR_CONFIG
+    assert json.loads(capsys.readouterr().out)["status"] == "confirmation_required"
+    assert cli.main(["rules", "--forget", "publisher.example", "--yes", "--json"]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out)["removed"] == 1
 
 
 def test_skill_installer_dry_run_uses_local_project():

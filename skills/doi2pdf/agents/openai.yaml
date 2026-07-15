@@ -1,4 +1,4 @@
 interface:
   display_name: "DOI2PDF"
-  short_description: "Fetch papers through lawful access routes"
-  default_prompt: "Use $doi2pdf to fetch this paper by DOI and report the route provenance."
+  short_description: "Fetch and learn lawful PDF routes"
+  default_prompt: "Use $doi2pdf to fetch this paper by DOI, report route provenance, and inspect any learned publisher rule."

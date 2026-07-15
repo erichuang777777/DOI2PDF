@@ -41,6 +41,14 @@ attempt but an unknown or out-of-coverage result does not silently block retriev
 route-health subsystem aggregates only local status fields and never exposes signed URLs,
 headers, cookies, or credentials.
 
+After registered publisher, citation metadata, and Zotero translator routes, the institutional
+browser may reuse a learned selector or optionally ask an OpenAI-compatible model to rank up to
+20 sanitized candidates. Only hostname, visible text, ARIA label, and URL path leave the browser;
+query strings and full page content do not. The download still runs through the authorized
+Playwright context and must pass magic-byte validation. Successful selectors are stored in the
+private browser profile, promoted after two successes, and disabled after three consecutive
+failures. The store never retains candidate URLs, signed parameters, cookies, or credentials.
+
 The local web interface is a loopback-only wrapper around the same package. It has no
 separate retrieval logic, so CLI, web, Zotero batch, and agent-skill behavior share the same
 validation and safety invariants.

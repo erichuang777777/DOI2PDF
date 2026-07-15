@@ -38,7 +38,8 @@ This matrix is the completeness contract between upstream paper-fetch v1.0 and D
 | local setup server and progress | guided web Settings, Activity, route report and Health pages | Equivalent replacement |
 | title-to-DOI Crossref matching | strict identifier resolver with title similarity validation | Integrated |
 | DuckDuckGo title guessing | none | Intentionally excluded: non-authoritative DOI guessing |
-| Ollama link selection | deterministic translator and PDF validation pipeline | Equivalent, auditable replacement |
+| Ollama link selection | optional sanitized OpenAI-compatible ranking plus deterministic fallback and PDF validation | Integrated with stricter privacy and auditability |
+| remember successful publisher behavior | profile-local selector rules; provisional, verified, auto-disabled | Integrated without retaining URLs or sessions |
 | Google Scholar/ResearchGate/author search links | DOI and configured library resolver only | Intentionally excluded from automatic retrieval provenance |
 | Sci-Hub/Anna's Archive routes | none | Intentionally excluded: unauthorized full-text sources |
 

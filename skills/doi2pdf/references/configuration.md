@@ -5,7 +5,8 @@ to the local `.env`, loads them into the running process environment, and render
 configured state afterward; it never sends a stored key back to the browser.
 
 The local console uses `/` for fetch, `/acceptance` for the real one-at-a-time test corpus,
-`/activity` for sanitized in-memory job logs, `/configure` for settings, `/jobs/<id>` for progress, and `/health` for machine-readable
+`/activity` for sanitized in-memory job logs, `/rules` for learned publisher selectors,
+`/configure` for settings, `/jobs/<id>` for progress, and `/health` for machine-readable
 readiness. Progress APIs intentionally omit local paths, secret values, cookies, headers, and
 candidate URLs.
 
@@ -38,6 +39,21 @@ HTTP code. `key_accepted` proves the provider accepted the credential for that r
 does not promise that every article is licensed. `rejected_or_not_entitled` may require a
 publisher account or institutional entitlement check. `rate_limited` means stop and retry
 later, not increase concurrency.
+
+## Optional LLM candidate ranking
+
+| Variable | Purpose |
+|---|---|
+| `DOI2PDF_LLM_ENABLED` | Enable the final sanitized ranking step |
+| `DOI2PDF_LLM_BASE_URL` | OpenAI-compatible HTTPS base URL, or loopback HTTP |
+| `DOI2PDF_LLM_MODEL` | Provider model identifier |
+| `DOI2PDF_LLM_API_KEY` | Optional provider key; stored as a secret |
+
+Use `doi2pdf api-check --provider llm --json` after saving. The ranker sends candidate text,
+ARIA labels, publisher hostname, and URL paths only. It strips all query strings and never sends
+page HTML, DOI, cookies, headers, credentials, or signed URLs. The result only changes candidate
+order; the authorized browser and `%PDF-` validator decide success. Rules are stored as selectors
+under the private browser profile and can be inspected with `doi2pdf rules --json`.
 
 ## Zotero translators
 
