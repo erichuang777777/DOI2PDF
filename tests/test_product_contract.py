@@ -27,6 +27,15 @@ def test_package_and_runtime_versions_match():
     assert project["project"]["version"] == __version__
 
 
+def test_windows_default_setup_is_lightweight_and_browser_is_explicit():
+    launcher = Path("DOI2PDF.bat").read_text(encoding="utf-8")
+    browser_setup = Path("DOI2PDF-browser-setup.bat").read_text(encoding="utf-8")
+    assert 'pip install -e ".[web]"' in launcher
+    assert "playwright install chromium" not in launcher
+    assert 'pip install -e ".[browser]"' in browser_setup
+    assert "playwright install chromium" in browser_setup
+
+
 def test_http_user_agent_uses_release_version():
     from doi2pdf.http import HttpClient
 
