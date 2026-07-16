@@ -46,9 +46,11 @@ out of prompts, command arguments, logs, and responses.
    [references/publisher-routes.md](references/publisher-routes.md) for publisher dispatch,
    LWW/Ovid, entitlement, and route-health diagnostics.
    If a publisher immediately shows a bot-verification interstitial, use
-   use the visible Playwright institutional login and complete the check manually. Do not treat
-   this as a CAPTCHA solver. The browser-use helper is temporarily not bundled because its
-   latest upstream dependency set does not pass the security audit.
+   the visible Playwright institutional login and complete the check manually. Do not treat
+   this as a CAPTCHA solver. The browser-use helper is disabled by default and not bundled
+   because its latest upstream dependency set does not pass the security audit. Do not set
+   `DOI2PDF_BROWSER_USE_ENABLED=true` unless the user explicitly opts in after independently
+   resolving and auditing that external installation.
 7. After ordinary publisher and translator routes, reuse verified publisher selectors. If the
    user enabled LLM ranking, allow it to rank only sanitized Playwright candidates. It does not
    authorize or validate a download. Remember a selector only after bounded structural PDF
@@ -107,6 +109,7 @@ doi2pdf holdings 10.1056/NEJMoa2404512 --json
 doi2pdf resolve "https://doi.org/10.1186/s12984-023-01168-x" --json
 doi2pdf fetch 10.1186/s12984-023-01168-x --no-institution --json
 doi2pdf login --json
+# Optional only after explicit browser-use opt-in; normally use doi2pdf login instead.
 doi2pdf browser-assist https://www.nejm.org/doi/pdf/10.1056/NEJMoa2600157 --json
 doi2pdf fetch 10.1002/example --zotero-key 9ET75JMH --author Chen --year 2026 --json
 doi2pdf batch-zotero --db "$HOME\Zotero\zotero.sqlite" --limit 10 --json

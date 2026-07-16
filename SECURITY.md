@@ -19,4 +19,5 @@ validation, institutional rate limits, or interactive SSO/MFA.
 
 The browser-use helper is not bundled in the secure installer while its latest upstream release
 pins dependencies with known advisories. DOI2PDF uses visible Playwright for authorized login and
-manual verification until an audited-compatible browser-use release is available.
+manual verification until an audited-compatible browser-use release is available. The helper also
+requires the explicit `DOI2PDF_BROWSER_USE_ENABLED=true` opt-in even if installed externally.

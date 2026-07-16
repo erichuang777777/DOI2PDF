@@ -767,6 +767,7 @@ def health() -> JSONResponse:
             "resolver": bool(settings.resolver_template),
             "holdings": bool(settings.holdings_db and settings.holdings_db.is_file()),
             "llm_assisted_discovery": settings.llm_enabled,
+            "browser_use_assist": settings.browser_use_enabled,
             "learned_rules": len(RuleStore(settings.browser_profile / "learned_pdf_rules.json").list()),
         },
         "route_health": {key: route_health[key] for key in ("route_events", "statuses", "blocks", "subscribed_route_gaps")},

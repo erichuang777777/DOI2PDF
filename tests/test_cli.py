@@ -68,6 +68,14 @@ def test_invalid_identifier_json_stays_on_stdout(capsys, monkeypatch):
     assert captured.err == ""
 
 
+def test_browser_assist_is_explicitly_disabled_by_default(capsys, monkeypatch):
+    monkeypatch.setattr(cli.Settings, "from_env", lambda: Settings())
+    assert cli.main(["browser-assist", "10.1056/NEJMoa2600157", "--json"]) == cli.EXIT_INPUT_OR_CONFIG
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "disabled"
+    assert payload["enable_variable"] == "DOI2PDF_BROWSER_USE_ENABLED"
+
+
 def test_acceptance_lists_real_cases_and_filters_publisher(capsys):
     assert cli.main(["acceptance", "--publisher", "Elsevier", "--json"]) == cli.EXIT_OK
     payload = json.loads(capsys.readouterr().out)
