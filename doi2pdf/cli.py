@@ -199,6 +199,17 @@ def main(argv: list[str] | None = None) -> int:
         _emit(args, payload, f"Detected {detection['label']}: {json.dumps(detection['updates'])}")
         return EXIT_OK
     if args.command == "browser-assist":
+        if not settings.browser_use_enabled:
+            payload = {
+                "schema": 1,
+                "ok": False,
+                "command": "browser-assist",
+                "status": "disabled",
+                "error": "browser-use assistance is disabled by default",
+                "enable_variable": "DOI2PDF_BROWSER_USE_ENABLED",
+            }
+            _emit(args, payload, payload["error"], error=True)
+            return EXIT_INPUT_OR_CONFIG
         try:
             target = args.target
             if not target.startswith(("http://", "https://")):
@@ -261,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
                 "publisher_route_count": len(ROUTES),
                 "holdings": bool(settings.holdings_db and settings.holdings_db.is_file()),
                 "llm_assisted_discovery": settings.llm_enabled,
+                "browser_use_assist": settings.browser_use_enabled,
             },
         }
         _emit(args, payload, "configuration OK" if ready else "\n".join(issues or ["Run doi2pdf-web to finish setup."]), error=not ready)

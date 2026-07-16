@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.3 - 2026-07-16
+
+- Made browser-use assistance explicitly disabled by default, including when browser-use was
+  installed separately in the environment.
+- Added the `DOI2PDF_BROWSER_USE_ENABLED` opt-in gate and stable `disabled` CLI status for agents.
+- Kept visible Playwright as the supported default for institutional login and manual verification.
+
 ## 0.8.2 - 2026-07-16
 
 - Integrated the first weekly Dependabot maintenance batch in one tested release rather than
