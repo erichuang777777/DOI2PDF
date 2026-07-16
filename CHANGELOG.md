@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.5 - 2026-07-16
+
+- Replaced the browser-use environment-variable gate with runtime detection of optional
+  Playwright and browser-use installations.
+- Made `doctor` and `/health` expose both optional browser capabilities without importing or
+  installing them.
+- Allowed an explicitly invoked `browser-assist` command to use an existing browser-use install;
+  otherwise it returns stable `unavailable` JSON while OA/API/console operation remains normal.
+
 ## 0.8.4 - 2026-07-16
 
 - Made the Windows one-click setup lightweight by default: OA, APIs, Zotero, resolver, CLI,

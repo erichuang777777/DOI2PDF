@@ -68,12 +68,31 @@ def test_invalid_identifier_json_stays_on_stdout(capsys, monkeypatch):
     assert captured.err == ""
 
 
-def test_browser_assist_is_explicitly_disabled_by_default(capsys, monkeypatch):
+def test_browser_assist_reports_optional_dependency_as_unavailable(capsys, monkeypatch):
     monkeypatch.setattr(cli.Settings, "from_env", lambda: Settings())
+    monkeypatch.setattr(cli, "browser_capabilities", lambda: {"playwright": False, "browser_use": False})
     assert cli.main(["browser-assist", "10.1056/NEJMoa2600157", "--json"]) == cli.EXIT_INPUT_OR_CONFIG
     payload = json.loads(capsys.readouterr().out)
-    assert payload["status"] == "disabled"
-    assert payload["enable_variable"] == "DOI2PDF_BROWSER_USE_ENABLED"
+    assert payload["status"] == "unavailable"
+    assert payload["optional_dependency"] == "browser-use"
+
+
+def test_browser_assist_uses_an_existing_optional_install(capsys, monkeypatch):
+    monkeypatch.setattr(cli.Settings, "from_env", lambda: Settings())
+    monkeypatch.setattr(cli, "browser_capabilities", lambda: {"playwright": False, "browser_use": True})
+
+    async def fake_open(url, profile, **kwargs):
+        assert url == "https://publisher.example/paper"
+        return {
+            "ok": True,
+            "status": "session_ready",
+            "after": {"current_url": url, "title": "Paper"},
+        }
+
+    monkeypatch.setattr(cli, "browser_use_open_url", fake_open)
+    assert cli.main(["browser-assist", "https://publisher.example/paper", "--no-wait", "--json"]) == cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "session_ready"
 
 
 def test_acceptance_lists_real_cases_and_filters_publisher(capsys):

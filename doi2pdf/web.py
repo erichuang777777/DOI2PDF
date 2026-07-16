@@ -20,6 +20,7 @@ from . import __version__
 from .acceptance import corpus
 from .api_probe import probe_all
 from .config import Settings
+from .capabilities import browser_capabilities
 from .naming import build_pdf_path
 from .learned_rules import RuleStore
 from .library_detect import detect_library_link
@@ -767,7 +768,7 @@ def health() -> JSONResponse:
             "resolver": bool(settings.resolver_template),
             "holdings": bool(settings.holdings_db and settings.holdings_db.is_file()),
             "llm_assisted_discovery": settings.llm_enabled,
-            "browser_use_assist": settings.browser_use_enabled,
+            "optional_browser": browser_capabilities(),
             "learned_rules": len(RuleStore(settings.browser_profile / "learned_pdf_rules.json").list()),
         },
         "route_health": {key: route_health[key] for key in ("route_events", "statuses", "blocks", "subscribed_route_gaps")},

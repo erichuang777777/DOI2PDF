@@ -47,10 +47,10 @@ out of prompts, command arguments, logs, and responses.
    LWW/Ovid, entitlement, and route-health diagnostics.
    If a publisher immediately shows a bot-verification interstitial, use
    the visible Playwright institutional login and complete the check manually. Do not treat
-   this as a CAPTCHA solver. The browser-use helper is disabled by default and not bundled
-   because its latest upstream dependency set does not pass the security audit. Do not set
-   `DOI2PDF_BROWSER_USE_ENABLED=true` unless the user explicitly opts in after independently
-   resolving and auditing that external installation.
+   this as a CAPTCHA solver. Playwright and browser-use are optional capabilities detected at
+   runtime; never install either merely to complete an OA/API task. If browser-use already exists,
+   call it only through an explicit user-requested `browser-assist` operation because the latest
+   upstream dependency set is not bundled and does not pass this project's security audit.
 7. After ordinary publisher and translator routes, reuse verified publisher selectors. If the
    user enabled LLM ranking, allow it to rank only sanitized Playwright candidates. It does not
    authorize or validate a download. Remember a selector only after bounded structural PDF

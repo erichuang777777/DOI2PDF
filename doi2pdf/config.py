@@ -85,7 +85,6 @@ class Settings:
     setup_complete: bool = False
     browser_profile: Path = field(default_factory=lambda: Path.home() / ".doi2pdf" / "browser")
     browser_headless: bool = False
-    browser_use_enabled: bool = False
     request_timeout_s: int = 45
     http_max_retries: int = 3
     min_institution_interval_s: float = 15.0
@@ -136,7 +135,6 @@ class Settings:
             setup_complete=_bool("DOI2PDF_SETUP_COMPLETE", False),
             browser_profile=Path(os.getenv("DOI2PDF_BROWSER_PROFILE", str(Path.home() / ".doi2pdf" / "browser"))),
             browser_headless=_bool("DOI2PDF_BROWSER_HEADLESS", False),
-            browser_use_enabled=_bool("DOI2PDF_BROWSER_USE_ENABLED", False),
             request_timeout_s=max(5, min(300, _number("DOI2PDF_REQUEST_TIMEOUT_S", 45, int, parse_issues))),
             http_max_retries=max(0, min(10, _number("DOI2PDF_HTTP_MAX_RETRIES", 3, int, parse_issues))),
             # Institutional automation always retains a courtesy floor. This is not

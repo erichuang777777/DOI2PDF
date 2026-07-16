@@ -19,6 +19,7 @@ from .batch_plan import group_items as group_batch_items
 from .browser_assist import _safe_url as safe_browser_url
 from .browser_assist import open_url as browser_use_open_url
 from .config import Settings
+from .capabilities import browser_capabilities
 from .holdings import Holdings
 from .learned_rules import RuleStore
 from .library_detect import detect_library_link
@@ -199,14 +200,15 @@ def main(argv: list[str] | None = None) -> int:
         _emit(args, payload, f"Detected {detection['label']}: {json.dumps(detection['updates'])}")
         return EXIT_OK
     if args.command == "browser-assist":
-        if not settings.browser_use_enabled:
+        capabilities = browser_capabilities()
+        if not capabilities["browser_use"]:
             payload = {
                 "schema": 1,
                 "ok": False,
                 "command": "browser-assist",
-                "status": "disabled",
-                "error": "browser-use assistance is disabled by default",
-                "enable_variable": "DOI2PDF_BROWSER_USE_ENABLED",
+                "status": "unavailable",
+                "error": "browser-use is not installed in this environment",
+                "optional_dependency": "browser-use",
             }
             _emit(args, payload, payload["error"], error=True)
             return EXIT_INPUT_OR_CONFIG
@@ -272,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
                 "publisher_route_count": len(ROUTES),
                 "holdings": bool(settings.holdings_db and settings.holdings_db.is_file()),
                 "llm_assisted_discovery": settings.llm_enabled,
-                "browser_use_assist": settings.browser_use_enabled,
+                "optional_browser": browser_capabilities(),
             },
         }
         _emit(args, payload, "configuration OK" if ready else "\n".join(issues or ["Run doi2pdf-web to finish setup."]), error=not ready)

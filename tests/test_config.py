@@ -27,10 +27,3 @@ def test_access_urls_reject_embedded_credentials():
     issues = settings.validate()
     assert any("OPENATHENS_REDIRECTOR_PREFIX cannot contain credentials" in issue for issue in issues)
     assert any("LIBRARY_RESOLVER_TEMPLATE" in issue for issue in issues)
-
-
-def test_browser_use_is_disabled_by_default_and_requires_explicit_opt_in(monkeypatch):
-    monkeypatch.delenv("DOI2PDF_BROWSER_USE_ENABLED", raising=False)
-    assert Settings.from_env().browser_use_enabled is False
-    monkeypatch.setenv("DOI2PDF_BROWSER_USE_ENABLED", "true")
-    assert Settings.from_env().browser_use_enabled is True

@@ -267,12 +267,13 @@ doi2pdf login --json
 This is a pause-for-human-action helper, not a CAPTCHA solver. It keeps the browser visible,
 lets you click through the challenge yourself, and then reuses the same profile state on the
 next `doi2pdf fetch`.
-The browser-use helper is disabled by default and not bundled because its latest upstream release
-pins dependencies with unresolved security advisories. `DOI2PDF_BROWSER_USE_ENABLED=true` is an
-explicit experimental opt-in for a separately installed and independently audited copy; normal
-users should leave it false. In a source checkout, install the audited
-browser components with `pip install -e ".[browser,web]"` and then run
-`playwright install chromium`.
+Playwright and browser-use are optional runtime capabilities: DOI2PDF detects them without
+importing or installing them. If Playwright is already present, institutional routes may use it;
+if browser-use is already present, an explicit `browser-assist` command may use it. Missing
+packages never block OA/API/console operation. Browser-use remains unbundled because its latest
+upstream release pins dependencies with unresolved security advisories; independently audit any
+external installation. To add the supported Playwright path, run `DOI2PDF-browser-setup.bat` or
+install `.[browser]` and then run `playwright install chromium`.
 
 For entitlement diagnostics, point `HOLDINGS_DB` at a read-only SQLite database containing:
 
