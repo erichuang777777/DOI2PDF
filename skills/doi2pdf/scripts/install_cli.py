@@ -12,7 +12,7 @@ from pathlib import Path
 
 # A movable tag lets a retagged release silently change the installed code.
 # Set DOI2PDF_INSTALL_REF to a commit SHA to pin the git fallback immutably.
-RELEASE = os.getenv("DOI2PDF_INSTALL_REF", "v0.8.1")
+RELEASE = os.getenv("DOI2PDF_INSTALL_REF", "v0.8.2")
 REPOSITORY = "https://github.com/erichuang777777/DOI2PDF.git"
 
 
@@ -29,12 +29,12 @@ def install_target() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Install DOI2PDF for this skill")
-    parser.add_argument("--with-browser", action="store_true", help="Also install Playwright, browser-use, and Chromium for institutional login")
+    parser.add_argument("--with-browser", action="store_true", help="Also install Playwright and Chromium for institutional login")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without changing the environment")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable result")
     args = parser.parse_args(argv)
 
-    extras = "web,browser,browser_use" if args.with_browser else "web"
+    extras = "web,browser" if args.with_browser else "web"
     target = install_target()
     if " @ git+" in target:
         package = target.replace("doi2pdf @", f"doi2pdf[{extras}] @", 1)

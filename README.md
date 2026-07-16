@@ -46,7 +46,7 @@ doi2pdf doctor --json
 ```
 
 Use `--with-browser` on the installer only when the user needs authorized OpenAthens/EZproxy
-access or browser-assisted verification; it installs Playwright, browser-use, and Chromium.
+access or browser-assisted verification; it installs Playwright and Chromium.
 Agents call the global `doi2pdf` command and parse one JSON envelope from stdout.
 If setup is required, they launch `doi2pdf-web`; API keys are entered only in the local HTML
 page, stored in the ignored `.env`, and never rendered back to the browser or agent.
@@ -78,7 +78,7 @@ concurrently; institutional requests retain their separate persistent rate limit
 ## One-click Windows app
 
 Double-click **`DOI2PDF.bat`**. On the first run it creates an isolated environment,
-installs DOI2PDF, browser-use, and Chromium, copies the local settings template, starts the server on
+installs DOI2PDF, Playwright, and Chromium, copies the local settings template, starts the server on
 `127.0.0.1`, and opens a guided browser setup. Enter a real contact email, choose the PDF
 folder, and optionally add your own library access links or publisher API keys. Later starts
 reuse the installation and go directly to retrieval.
@@ -251,19 +251,19 @@ registry. Plain EZproxy/NetScaler login forms may optionally use `LIBRARY_LOGIN_
 `LIBRARY_USERNAME`, `LIBRARY_PASSWORD`, and CSS selectors stored only in the ignored `.env`.
 OpenAthens/Shibboleth, CAPTCHA, and MFA always remain interactive in visible Chromium.
 
-If a publisher's page immediately drops you into a bot-verification screen, use the
-browser-use assist mode to open the exact institutional URL in your local browser profile and
-finish the check manually:
+If a publisher's page immediately drops you into a bot-verification screen, use DOI2PDF's
+visible Playwright institutional browser and finish the check manually:
 
 ```powershell
-doi2pdf browser-assist https://www.nejm.org/doi/pdf/10.1056/NEJMoa2600157
+doi2pdf login --json
 ```
 
 This is a pause-for-human-action helper, not a CAPTCHA solver. It keeps the browser visible,
 lets you click through the challenge yourself, and then reuses the same profile state on the
 next `doi2pdf fetch`.
-The skill installer includes browser-use with `--with-browser`. In a source checkout, install
-all browser components with `pip install -e ".[browser,browser_use,web]"` and then run
+The browser-use helper is temporarily not bundled because its latest upstream release pins
+dependencies with unresolved security advisories. In a source checkout, install the audited
+browser components with `pip install -e ".[browser,web]"` and then run
 `playwright install chromium`.
 
 For entitlement diagnostics, point `HOLDINGS_DB` at a read-only SQLite database containing:

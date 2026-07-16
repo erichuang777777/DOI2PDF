@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.2 - 2026-07-16
+
+- Integrated the first weekly Dependabot maintenance batch in one tested release rather than
+  shipping nine independent dependency changes.
+- Updated GitHub Actions checkout to v7, setup-python to v6, and upload-artifact to v7, removing
+  the Node 20 deprecation warning from the release pipeline.
+- Raised the tested minimums for Playwright 1.61.0, setuptools 83.0.0, Twine 6.2.0,
+  Ruff 0.15.21, and pip-audit 2.10.1.
+- Updated Requests to 2.34.2 and pypdf to 6.13.3 or newer.
+- Temporarily removed browser-use from the bundled installer because its latest upstream release
+  pins multiple dependencies with known advisories. Visible Playwright remains the supported
+  institutional login and manual-verification path.
+
 ## 0.8.1 - 2026-07-16
 
 - Made `doctor --json` distinguish a valid configuration from completed first-run setup,

@@ -13,7 +13,7 @@ out of prompts, command arguments, logs, and responses.
 
 1. Run `doi2pdf doctor --json`. If the command is unavailable, run
    `python scripts/install_cli.py` relative to this skill directory. Add `--with-browser` only
-   when institutional login is required and the user permits installing browser-use and Chromium.
+   when institutional login is required and the user permits installing Playwright and Chromium.
 2. Treat `ok` as the readiness decision. If doctor returns `setup_required`, launch
    `doi2pdf-web` and direct the user to the local
    HTML console. Use **Settings** for configuration, **Activity** for sanitized live logs, and
@@ -46,8 +46,9 @@ out of prompts, command arguments, logs, and responses.
    [references/publisher-routes.md](references/publisher-routes.md) for publisher dispatch,
    LWW/Ovid, entitlement, and route-health diagnostics.
    If a publisher immediately shows a bot-verification interstitial, use
-   `doi2pdf browser-assist <URL-or-DOI> --json` to open the exact target in the local browser
-   profile and complete the check manually. Do not treat this as a CAPTCHA solver.
+   use the visible Playwright institutional login and complete the check manually. Do not treat
+   this as a CAPTCHA solver. The browser-use helper is temporarily not bundled because its
+   latest upstream dependency set does not pass the security audit.
 7. After ordinary publisher and translator routes, reuse verified publisher selectors. If the
    user enabled LLM ranking, allow it to rank only sanitized Playwright candidates. It does not
    authorize or validate a download. Remember a selector only after bounded structural PDF
