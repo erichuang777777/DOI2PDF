@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "doi2pdf"
-version = "0.8.1"
+version = "0.8.2"
 description = "Lawful DOI-to-PDF retrieval through OA, publisher TDM, institutional access, and library resolvers"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -21,33 +21,30 @@ classifiers = [
 ]
 dependencies = [
     "python-dotenv>=1.0.0",
-    "requests>=2.31.0",
+    "requests>=2.34.2",
     "beautifulsoup4>=4.12.0",
     "defusedxml>=0.7.1",
-    "pypdf>=5.0.0,<7",
+    "pypdf>=6.13.3,<7",
 ]
 
 [project.optional-dependencies]
 browser = [
-    "playwright>=1.40.0",
-]
-browser_use = [
-    "browser-use>=0.13.4,<0.14",
+    "playwright>=1.61.0",
 ]
 web = [
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
 ]
 dev = [
-    "playwright>=1.40.0",
+    "playwright>=1.61.0",
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
     "build>=1.2.0",
     "pytest>=8.0",
     "pyyaml>=6.0",
-    "ruff>=0.6.0",
-    "twine>=5.0",
-    "pip-audit>=2.10.0",
+    "ruff>=0.15.21",
+    "twine>=6.2.0",
+    "pip-audit>=2.10.1",
 ]
 
 [project.scripts]

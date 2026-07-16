@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     rules.add_argument("--host", help="Filter rules by publisher hostname")
     rules.add_argument("--forget", metavar="HOST", help="Forget every learned selector for one hostname")
     rules.add_argument("--yes", action="store_true", help="Required non-interactive confirmation with --forget")
-    browser_assist = sub.add_parser("browser-assist", help="Open an institutional URL in browser-use and pause for manual verification")
+    browser_assist = sub.add_parser("browser-assist", help="Use an optional external browser-use install for manual verification")
     browser_assist.add_argument("target", help="A DOI, DOI URL, or direct article/PDF URL")
     browser_assist.add_argument("--headless", action="store_true", help="Launch browser-use headless (not recommended for verification)")
     browser_assist.add_argument("--no-wait", action="store_true", help="Do not pause for manual verification")

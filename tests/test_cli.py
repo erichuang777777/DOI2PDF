@@ -282,7 +282,7 @@ def test_skill_installer_dry_run_uses_local_project():
     assert Path(payload["target"]).name == Path.cwd().name
 
 
-def test_skill_installer_browser_mode_includes_browser_use():
+def test_skill_installer_browser_mode_includes_audited_playwright_only():
     script = Path("skills/doi2pdf/scripts/install_cli.py")
     completed = subprocess.run(
         [sys.executable, str(script), "--with-browser", "--dry-run", "--json"],
@@ -291,4 +291,4 @@ def test_skill_installer_browser_mode_includes_browser_use():
         text=True,
     )
     payload = json.loads(completed.stdout)
-    assert payload["commands"][0][-1].endswith("[web,browser,browser_use]")
+    assert payload["commands"][0][-1].endswith("[web,browser]")

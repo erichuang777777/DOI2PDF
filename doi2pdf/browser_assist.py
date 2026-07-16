@@ -40,7 +40,10 @@ async def open_url(
     try:
         from browser_use import Browser
     except ImportError as exc:  # pragma: no cover - runtime dependency gate
-        raise RuntimeError("Install the browser-use extra first: pip install -e '.[browser_use]'") from exc
+        raise RuntimeError(
+            "browser-use assistance is not bundled because its current dependency set fails "
+            "the security audit; use DOI2PDF's visible Playwright login instead"
+        ) from exc
 
     browser = Browser(
         headless=headless,
