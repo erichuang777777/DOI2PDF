@@ -95,7 +95,7 @@ class DOI2PDF:
                 result.attempts.append(Attempt("zotero_translator_web", "open_access", None, "unavailable", str(exc)))
                 self._emit(progress, 78, "translator", "Publisher translator unavailable", source="zotero_translator_web", status="unavailable")
 
-        if use_institution:
+        if use_institution and self.settings.allow_institutional_fallback():
             self._emit(progress, 82, "institution", "Checking the authorized institutional session")
             try:
                 institution = self.institution.fetch(doi)

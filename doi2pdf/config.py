@@ -14,6 +14,7 @@ def _bool(name: str, default: bool) -> bool:
 
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PLACEHOLDER_EMAILS = {"you@example.org", "your@email.com", "evolved@zotero.org"}
+NETWORK_MODES = {"auto", "off_campus", "campus"}
 
 
 @dataclass
@@ -53,6 +54,7 @@ class Settings:
     min_institution_interval_s: float = 15.0
     max_institution_requests_per_day: int = 100
     core_api_key: str = ""
+    network_mode: str = "auto"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -103,12 +105,37 @@ class Settings:
                 1, min(100, int(os.getenv("DOI2PDF_MAX_INSTITUTION_REQUESTS_PER_DAY", "100")))
             ),
             core_api_key=os.getenv("CORE_API_KEY", ""),
+            network_mode=os.getenv("DOI2PDF_NETWORK_MODE", "auto"),
         )
 
     def resolver_url(self, doi: str) -> str | None:
         if not self.resolver_template:
             return None
         return self.resolver_template.format(doi=doi)
+
+    def normalized_network_mode(self) -> str:
+        value = (self.network_mode or "auto").strip().lower().replace("-", "_")
+        if value in {"offcampus", "off_campus_only"}:
+            value = "off_campus"
+        return value if value in NETWORK_MODES else "auto"
+
+    def effective_network_mode(self) -> str:
+        mode = self.normalized_network_mode()
+        if mode != "auto":
+            return mode
+        if any((
+            self.openathens_redirector_prefix,
+            self.ezproxy_prefix,
+            self.ezproxy_suffix,
+            self.library_login_url,
+            self.library_username,
+            self.library_password,
+        )):
+            return "campus"
+        return "off_campus"
+
+    def allow_institutional_fallback(self) -> bool:
+        return self.effective_network_mode() == "campus"
 
     def validate(self) -> list[str]:
         issues: list[str] = []
@@ -129,6 +156,9 @@ class Settings:
             issues.append("LIBRARY_LOGIN_URL must start with https://")
         if bool(self.library_username) != bool(self.library_password):
             issues.append("LIBRARY_USERNAME and LIBRARY_PASSWORD must be configured together.")
+        raw_mode = (self.network_mode or "auto").strip().lower().replace("-", "_")
+        if raw_mode not in NETWORK_MODES and raw_mode not in {"offcampus", "off_campus_only"}:
+            issues.append("DOI2PDF_NETWORK_MODE must be auto, off_campus, or campus.")
         if self.resolver_template and "{doi}" not in self.resolver_template:
             issues.append("LIBRARY_RESOLVER_TEMPLATE must contain {doi}.")
         if self.llm_enabled:

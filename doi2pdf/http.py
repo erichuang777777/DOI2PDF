@@ -13,10 +13,25 @@ from urllib3.util.retry import Retry
 
 
 PDF_MAGIC = b"%PDF-"
+CHALLENGE_MARKERS = (
+    "just a moment",
+    "performing security verification",
+    "verify you are human",
+    "validating you are human",
+    "驗證您是人類",
+    "正在執行安全驗證",
+    "cloudflare",
+    "recaptcha",
+)
 
 
 def looks_like_pdf(content: bytes) -> bool:
     return len(content) >= 1024 and content[:1024].lstrip().startswith(PDF_MAGIC)
+
+
+def looks_like_challenge(content: bytes) -> bool:
+    sample = content[:8192].decode("utf-8", errors="ignore").lower()
+    return any(marker in sample for marker in CHALLENGE_MARKERS)
 
 
 def _is_public_ip(ip: str) -> bool:
@@ -113,6 +128,8 @@ class HttpClient:
             return None, f"request_error:{exc.__class__.__name__}"
         if response.status_code != 200:
             return None, f"http_{response.status_code}"
+        if looks_like_challenge(response.content):
+            return None, "cf_challenge"
         if not looks_like_pdf(response.content):
             return None, "not_pdf"
         return response.content, "pdf"
@@ -124,6 +141,8 @@ class HttpClient:
             return None, f"request_error:{exc.__class__.__name__}"
         if response.status_code != 200:
             return None, f"http_{response.status_code}"
+        if looks_like_challenge(response.content):
+            return None, "cf_challenge"
         if looks_like_pdf(response.content):
             return response.url, "pdf"
         try:

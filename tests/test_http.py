@@ -58,6 +58,19 @@ def test_fetch_pdf_does_not_retry_client_errors():
         server.shutdown()
 
 
+def test_fetch_pdf_reports_challenge_pages_explicitly():
+    server, calls = _serve([(200, b"Performing security verification")])
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/paper.pdf"
+        client = HttpClient("test@example.org", timeout=5, max_retries=0, block_private_hosts=False)
+        content, status = client.fetch_pdf(url)
+        assert content is None
+        assert status == "cf_challenge"
+        assert len(calls) == 1
+    finally:
+        server.shutdown()
+
+
 def test_fetch_pdf_gives_up_after_max_retries_exhausted():
     server, calls = _serve([(503, b"")])
     try:

@@ -29,6 +29,9 @@ dependencies = [
 browser = [
     "playwright>=1.40.0",
 ]
+browser_use = [
+    "browser-use>=0.13.4",
+]
 web = [
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",

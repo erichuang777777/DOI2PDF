@@ -43,6 +43,7 @@ def test_setup_explains_required_and_optional_fields(monkeypatch):
     assert "Never enter your library password" in page
     assert "Official application instructions" in page
     assert "dev.elsevier.com" in page
+    assert 'name="DOI2PDF_NETWORK_MODE"' in page
 
 
 def test_write_env_preserves_secret_when_blank(tmp_path: Path, monkeypatch):
@@ -87,6 +88,7 @@ def test_settings_pages_never_render_stored_api_keys(monkeypatch):
     assert 'name="LIBRARY_PASSWORD" value=""' in pages
     assert 'name="LIBRARY_USERNAME" value=""' in pages
     assert 'name="DOI2PDF_LLM_API_KEY" value=""' in pages
+    assert 'name="DOI2PDF_NETWORK_MODE"' in pages
     assert "configured — leave blank to keep" in pages
 
 
@@ -99,6 +101,7 @@ def test_health_does_not_expose_secrets(monkeypatch):
     payload = json_from_response(web.health())
     assert "top-secret" not in str(payload)
     assert payload["version"]
+    assert payload["network_mode"] == "auto"
 
 
 def test_registered_pdf_can_be_served_inline_or_downloaded(tmp_path: Path):
@@ -153,7 +156,7 @@ def test_activity_and_progress_pages_are_live_console_views():
 def test_acceptance_page_offers_only_one_at_a_time_tests(monkeypatch):
     monkeypatch.setattr(web, "_settings", lambda: web.Settings(download_dir=Path("papers")))
     page = web.acceptance()
-    assert page.count("Try with my access") == 7
+    assert page.count("Try with my access") == 8
     assert 'name="use_institution" value="1"' in page
     assert "bulk test" in page
     assert "10.1056/NEJMoa2404512" in page
@@ -195,6 +198,7 @@ def test_configure_has_official_api_links_and_library_assistant(monkeypatch):
         assert host in page
     assert 'action="/library-detect"' in page
     assert "Nothing is saved until" in page
+    assert 'name="DOI2PDF_NETWORK_MODE"' in page
 
 
 def test_library_detect_preview_never_renders_target_url():

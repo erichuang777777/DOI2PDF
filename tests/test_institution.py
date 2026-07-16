@@ -123,6 +123,10 @@ def test_validated_learned_selector_is_reused_and_promoted(tmp_path):
             pass
 
         @staticmethod
+        def content():
+            return '<html><a href="/paper.pdf">Download PDF</a></html>'
+
+        @staticmethod
         def locator(selector):
             class First:
                 first = Locator()
@@ -133,6 +137,28 @@ def test_validated_learned_selector_is_reused_and_promoted(tmp_path):
     content, status = browser._generic_or_meta(Page(), Context(), [], "10.1/example", None)
     assert content.startswith(b"%PDF-") and status == "pdf_learned_rule"
     assert browser.rules.list()[0]["status"] == "verified"
+
+
+def test_cloudflare_challenge_is_reported_explicitly():
+    class Page:
+        url = "https://www.nejm.org/doi/pdf/10.1056/NEJMoa2600157"
+
+        @staticmethod
+        def wait_for_timeout(value):
+            pass
+
+        @staticmethod
+        def content():
+            return "Performing security verification"
+
+        @staticmethod
+        def title():
+            return "Just a moment..."
+
+    browser = InstitutionalBrowser(Settings())
+    content, status = browser._generic_or_meta(Page(), type("Context", (), {"request": None})(), [], "10.1056/NEJMoa2600157", None)
+    assert content is None
+    assert status == "cf_challenge"
 
 
 def test_llm_endpoint_requires_https_or_loopback():

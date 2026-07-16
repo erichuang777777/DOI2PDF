@@ -74,13 +74,29 @@ def test_manual_resolver_completes_progress(tmp_path: Path):
 
 
 def test_institution_route_and_entitlement_are_preserved(tmp_path: Path):
-    app = DOI2PDF(Settings(translator_enabled=False), http=FakeHttp())
+    app = DOI2PDF(Settings(translator_enabled=False, network_mode="campus", openathens_redirector_prefix="https://go.openathens.net/redirector/example?url="), http=FakeHttp())
     app.oa.candidates = lambda doi: ([], [])
     app.tdm.routes = lambda doi: (_ for _ in ())
     app.institution.fetch = lambda doi: InstitutionResult(PDF, "openathens:nejm:tpl", "pdf", {"subscribed": True, "covered": True})
     result = app.fetch("10.1056/NEJMoa1", tmp_path / "paper.pdf")
     assert result.ok and result.route == "openathens:nejm:tpl"
     assert result.metadata["entitlement"]["covered"] is True
+
+
+def test_off_campus_mode_skips_institution_even_when_requested(tmp_path: Path):
+    app = DOI2PDF(Settings(translator_enabled=False, network_mode="off_campus"), http=FakeHttp())
+    app.oa.candidates = lambda doi: ([], [])
+    app.tdm.routes = lambda doi: (_ for _ in ())
+    called = {"value": False}
+
+    def fail_if_called(doi):
+        called["value"] = True
+        raise AssertionError("institution.fetch should not run off-campus")
+
+    app.institution.fetch = fail_if_called
+    result = app.fetch("10.1056/NEJMoa1", tmp_path / "paper.pdf", use_institution=True)
+    assert not result.ok
+    assert called["value"] is False
 
 
 def test_tdm_shares_the_http_client_session():

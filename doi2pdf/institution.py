@@ -94,6 +94,15 @@ def profile_lock(profile: Path):
 
 class InstitutionalBrowser:
     E3_MARKERS = ("License Service Failure", "Code: E3", "LicenseServiceFailure")
+    CHALLENGE_MARKERS = (
+        "just a moment",
+        "performing security verification",
+        "verify you are human",
+        "validating you are human",
+        "驗證您是人類",
+        "正在執行安全驗證",
+        "cloudflare",
+    )
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -196,6 +205,16 @@ class InstitutionalBrowser:
             return "auth_required"
         return f"http_{response.status}"
 
+    @classmethod
+    def _looks_like_challenge(cls, page, document: str = "") -> bool:
+        parts = [document, getattr(page, "url", ""), ""]
+        try:
+            parts.append(page.title())
+        except Exception:
+            pass
+        low = " ".join(parts).lower()
+        return any(marker in low for marker in cls.CHALLENGE_MARKERS)
+
     def _request_pdf(self, context, url: str, referer: str | None = None, retries: int = 1) -> tuple[bytes | None, str]:
         for attempt in range(retries):
             response = context.request.get(
@@ -265,6 +284,9 @@ class InstitutionalBrowser:
         page.wait_for_timeout(4_000)
         if captured:
             return captured[0], "pdf"
+        document = page.content()
+        if self._looks_like_challenge(page, document):
+            return None, "cf_challenge"
         host = (urlsplit(page.url).hostname or "").lower()
         suffix = self.settings.ezproxy_suffix.lower().lstrip(".")
         # Do not retain or send the institution-specific proxy hostname. Reverse
@@ -282,7 +304,6 @@ class InstitutionalBrowser:
                 self.rules.remember(host, rule["selector"], text_hint=rule.get("text_hint", ""), source="learned")
                 return content, "pdf_learned_rule"
             self.rules.failed(host, rule["selector"])
-        document = page.content()
         pdf_url = citation_pdf_url(document)
         if pdf_url:
             if self.settings.ezproxy_suffix:
@@ -319,6 +340,8 @@ class InstitutionalBrowser:
         if captured:
             return captured[0], "pdf"
         document = page.content()
+        if self._looks_like_challenge(page, document):
+            return None, "cf_challenge"
         if any(marker in document for marker in self.E3_MARKERS):
             self._set_ovid_cooldown()
             return None, "license_seat_e3"
@@ -374,6 +397,8 @@ class InstitutionalBrowser:
                 if captured or network["viewer"]:
                     break
                 document = page.content()
+                if self._looks_like_challenge(page, document):
+                    return None, "cf_challenge"
                 if any(marker in document for marker in self.E3_MARKERS):
                     self._set_ovid_cooldown()
                     return None, "license_seat_e3"

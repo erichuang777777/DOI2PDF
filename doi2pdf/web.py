@@ -99,6 +99,28 @@ API_HELP = {
     "springer": ("Register in Springer Nature API Management.", "https://dev.springernature.com/docs/quick-start/api-access/"),
     "unpaywall": ("No key is required; Unpaywall asks for a real contact email.", "https://unpaywall.org/products/api"),
 }
+NETWORK_MODE_HELP = {
+    "auto": "Use campus routes when library access is configured; otherwise stay on OA/API only.",
+    "off_campus": "Stay on OA, OpenAthens, and official API routes only; skip institutional browser fallback.",
+    "campus": "Allow OA/API first, then institutional session, EZproxy, and browser-assisted discovery.",
+}
+
+
+def _network_mode_field(settings: Settings) -> str:
+    current = settings.normalized_network_mode()
+    options = "".join(
+        f'<option value="{value}" {"selected" if value == current else ""}>{html.escape(label)}</option>'
+        for value, label in (
+            ("auto", "Auto — infer from configured library access"),
+            ("off_campus", "Off-campus — OA / OpenAthens / API only"),
+            ("campus", "Campus — allow institutional fallback and browser assist"),
+        )
+    )
+    return (
+        '<label>Network mode</label>'
+        f'<select name="DOI2PDF_NETWORK_MODE">{options}</select>'
+        f'<p class="muted">{html.escape(NETWORK_MODE_HELP[current])}</p>'
+    )
 
 
 @app.middleware("http")
@@ -288,6 +310,7 @@ def _route_status(settings: Settings) -> str:
         ("Publisher APIs", bool(settings.elsevier_api_key or settings.wiley_tdm_token or settings.springer_api_key), "Optional Elsevier, Wiley, Springer keys"),
         ("Library access", bool(settings.openathens_redirector_prefix or settings.ezproxy_prefix or settings.ezproxy_suffix), "Your OpenAthens or EZproxy"),
         ("Manual resolver", bool(settings.resolver_template), "SFX/OpenURL fallback"),
+        ("Network mode", True, f"{settings.effective_network_mode()} · {NETWORK_MODE_HELP[settings.normalized_network_mode()]}"),
     )
     return '<div class="grid">' + "".join(
         f'<div class="status"><strong>{"✓" if ready else "○"} {html.escape(name)}</strong><span class="muted">{html.escape(detail)}</span></div>'
@@ -310,7 +333,7 @@ def home():
 <label for="identifier">DOI, PMID, DOI URL, or exact title</label><input id="identifier" name="identifier" required autofocus placeholder="10.1186/s12984-023-01168-x">
 <label for="output_dir">Save folder</label><input id="output_dir" name="output_dir" value="{html.escape(str(settings.download_dir), quote=True)}">
 <details><summary>Optional Zotero filename</summary><label for="zotero_key">Zotero item key</label><input id="zotero_key" name="zotero_key" maxlength="8" placeholder="9ET75JMH"></details>
-<label class="check"><input type="checkbox" name="use_institution" value="1" checked> Use my configured OpenAthens/EZproxy session after OA and TDM routes</label>
+<label class="check"><input type="checkbox" name="use_institution" value="1" {"checked" if settings.allow_institutional_fallback() else ""}> Use my configured OpenAthens/EZproxy session after OA and TDM routes</label>
 <button type="submit">Retrieve PDF</button></form></section>
 <section class="card"><h2>Safety</h2><p>This tool uses public OA sources, official publisher APIs, and your own authorized library session. It does not bypass paywalls or share credentials. Institutional retrieval is serialized, delayed, and daily-limited.</p><p class="muted">Automating even your own authorized session can still be restricted by a publisher's or your institution's terms of service. Confirm your library's and publishers' policies permit automated retrieval before enabling institutional access, and stop if asked to by your library.</p></section>
 <div id="working"><div><div class="spinner"></div><h2>Starting the live tracker…</h2><p class="muted">The progress page will show each lawful retrieval layer as it runs.</p></div></div>
@@ -329,6 +352,7 @@ def setup() -> str:
 {_application_help("unpaywall", "Why Unpaywall asks for this")}
 <label>Where should PDFs be saved?</label><input name="DOWNLOAD_DIR" value="{html.escape(str(settings.download_dir), quote=True)}" placeholder="downloads"></section>
 <section class="card"><h2>2. Library access (optional)</h2><p>Open-access papers work without this section. For subscribed papers, paste the prefix supplied by your own library. Never enter your library password here.</p>
+{_network_mode_field(settings)}
 <label>OpenAthens redirector prefix</label><input name="OPENATHENS_REDIRECTOR_PREFIX" value="{html.escape(settings.openathens_redirector_prefix, quote=True)}" placeholder="https://go.openathens.net/redirector/YOUR-DOMAIN?url=">
 <p class="muted">Usually found in your library portal or OpenAthens Redirector link generator.</p>
 <label>EZproxy login prefix</label><input name="EZPROXY_PREFIX" value="{html.escape(settings.ezproxy_prefix, quote=True)}" placeholder="https://login.yourlibrary.edu/login?url=">
@@ -356,6 +380,7 @@ async def save_setup(request: Request):
         contact_email=email,
         unpaywall_email=email,
         setup_complete=True,
+        network_mode=form.get("DOI2PDF_NETWORK_MODE", "auto").strip() or "auto",
         openathens_redirector_prefix=form.get("OPENATHENS_REDIRECTOR_PREFIX", "").strip(),
         ezproxy_prefix=form.get("EZPROXY_PREFIX", "").strip(),
         resolver_template=form.get("LIBRARY_RESOLVER_TEMPLATE", "").strip(),
@@ -366,7 +391,7 @@ async def save_setup(request: Request):
     allowed = {
         "DOI2PDF_CONTACT_EMAIL", "DOWNLOAD_DIR", "PUBMED_API_KEY", "S2_API_KEY",
         "ELSEVIER_TDM_KEY", "ELSEVIER_INSTTOKEN", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
-        "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "LIBRARY_RESOLVER_TEMPLATE",
+        "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "LIBRARY_RESOLVER_TEMPLATE", "DOI2PDF_NETWORK_MODE",
     }
     updates = {key: value.strip() for key, value in form.items() if key in allowed}
     updates["UNPAYWALL_EMAIL"] = email
@@ -584,6 +609,7 @@ def configure() -> str:
 <label>Unpaywall email</label><input type="email" name="UNPAYWALL_EMAIL" value="{html.escape(settings.unpaywall_email, quote=True)}">
 {_application_help("unpaywall")}
 <label>Default PDF folder</label><input name="DOWNLOAD_DIR" value="{html.escape(str(settings.download_dir), quote=True)}">
+{_network_mode_field(settings)}
 {_secret_field("PubMed API key", "PUBMED_API_KEY", bool(settings.pubmed_api_key))}
 {_application_help("pubmed")}
 {_secret_field("Semantic Scholar API key", "S2_API_KEY", bool(settings.semantic_scholar_api_key))}
@@ -600,6 +626,7 @@ def configure() -> str:
 <label>OpenAI-compatible base URL</label><input name="DOI2PDF_LLM_BASE_URL" value="{html.escape(settings.llm_base_url, quote=True)}" placeholder="https://provider.example/v1 or http://127.0.0.1:11434/v1">
 <label>Model</label><input name="DOI2PDF_LLM_MODEL" value="{html.escape(settings.llm_model, quote=True)}">
 {_secret_field("LLM API key", "DOI2PDF_LLM_API_KEY", bool(settings.llm_api_key))}</details>
+{_network_mode_field(settings)}
 <label>OpenAthens redirector prefix</label><input name="OPENATHENS_REDIRECTOR_PREFIX" value="{html.escape(settings.openathens_redirector_prefix, quote=True)}" placeholder="https://go.openathens.net/redirector/YOUR-DOMAIN?url=">
 <label>EZproxy prefix/template</label><input name="EZPROXY_PREFIX" value="{html.escape(settings.ezproxy_prefix, quote=True)}">
 <label>EZproxy publisher-host suffix</label><input name="EZPROXY_SUFFIX" value="{html.escape(settings.ezproxy_suffix, quote=True)}" placeholder="ezproxy.example.edu"><p class="muted">Optional. Enables the original publisher-specific template, metadata, and LWW/Ovid routes.</p>
@@ -626,7 +653,7 @@ async def save_configuration(request: Request):
     allowed = {
         "DOI2PDF_CONTACT_EMAIL", "UNPAYWALL_EMAIL", "DOWNLOAD_DIR", "PUBMED_API_KEY", "S2_API_KEY",
         "ELSEVIER_TDM_KEY", "ELSEVIER_INSTTOKEN", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
-        "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "EZPROXY_SUFFIX", "LIBRARY_RESOLVER_TEMPLATE",
+        "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "EZPROXY_SUFFIX", "LIBRARY_RESOLVER_TEMPLATE", "DOI2PDF_NETWORK_MODE",
         "HOLDINGS_DB", "PAPER_RADAR_DB",
         "LIBRARY_LOGIN_URL", "LIBRARY_USERNAME", "LIBRARY_PASSWORD", "LIBRARY_USER_SELECTOR",
         "LIBRARY_PASSWORD_SELECTOR", "LIBRARY_SUBMIT_SELECTOR",
@@ -639,6 +666,7 @@ async def save_configuration(request: Request):
         contact_email=updates.get("DOI2PDF_CONTACT_EMAIL", ""),
         unpaywall_email=updates.get("UNPAYWALL_EMAIL", ""),
         setup_complete=True,
+        network_mode=updates.get("DOI2PDF_NETWORK_MODE", "auto"),
         openathens_redirector_prefix=updates.get("OPENATHENS_REDIRECTOR_PREFIX", ""),
         ezproxy_prefix=updates.get("EZPROXY_PREFIX", ""),
         ezproxy_suffix=updates.get("EZPROXY_SUFFIX", ""),
@@ -716,6 +744,8 @@ def health() -> JSONResponse:
     return JSONResponse({
         "ok": not settings.needs_setup(), "version": __version__, "issues": settings.validate(),
         "setup_complete": not settings.needs_setup(),
+        "network_mode": settings.normalized_network_mode(),
+        "effective_network_mode": settings.effective_network_mode(),
         "jobs": {"active": active_jobs, "recent": recent_jobs},
         "library_login": {"state": _LOGIN_STATE.get("state", "idle"), "message": _redact(_LOGIN_STATE.get("message", ""))},
         "routes": {

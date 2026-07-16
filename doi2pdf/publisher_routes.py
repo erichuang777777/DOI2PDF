@@ -48,6 +48,13 @@ def route_for(doi: str) -> RouteSpec | None:
     return ROUTES.get(doi.lower().split("/", 1)[0])
 
 
+def route_group_for(doi: str) -> str:
+    spec = route_for(doi)
+    if spec and spec.label:
+        return spec.label
+    return doi.lower().split("/", 1)[0]
+
+
 def template_url(spec: RouteSpec, doi: str) -> str:
     if not spec.host or not spec.path:
         raise ValueError("Route is not a URL template")

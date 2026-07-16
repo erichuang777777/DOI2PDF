@@ -55,6 +55,14 @@ LIVE_CORPUS: tuple[dict[str, Any], ...] = (
         "baseline": "not_retrieved_without_access",
     },
     {
+        "doi": "10.1056/NEJMoa2600157",
+        "publisher": "New England Journal of Medicine",
+        "title": "Continuous or Fixed-Duration Maintenance Therapy in Multiple Myeloma",
+        "source_url": "https://www.nejm.org/doi/pdf/10.1056/NEJMoa2600157",
+        "access_class": "subscription",
+        "baseline": "not_retrieved_without_access",
+    },
+    {
         "doi": "10.1093/eurheartj/ehaf429",
         "publisher": "Oxford University Press",
         "title": "Lessons from coronary physiology: primum non nocere",

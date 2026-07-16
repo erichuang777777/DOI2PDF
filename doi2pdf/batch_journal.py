@@ -20,6 +20,7 @@ def append(path: Path, row: dict[str, Any]) -> None:
         "title": str(row.get("title") or "")[:500],
         "status": str(row.get("status") or "")[:80],
         "route": str(row.get("route") or "")[:120],
+        "group": str(row.get("group") or "")[:120],
         "path": str(row.get("path") or "")[:1000],
         "error_type": str(row.get("error_type") or "")[:120],
     }
