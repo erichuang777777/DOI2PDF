@@ -14,10 +14,14 @@ out of prompts, command arguments, logs, and responses.
 1. Run `doi2pdf doctor --json`. If the command is unavailable, run
    `python scripts/install_cli.py` relative to this skill directory. Add `--with-browser` only
    when institutional login is required and the user permits installing browser-use and Chromium.
-2. If doctor returns `setup_required`, launch `doi2pdf-web` and direct the user to the local
+2. Treat `ok` as the readiness decision. If doctor returns `setup_required`, launch
+   `doi2pdf-web` and direct the user to the local
    HTML console. Use **Settings** for configuration, **Activity** for sanitized live logs, and
    the job progress page for route-by-route monitoring. Never ask the user to paste an API key
    or password into chat.
+   `configuration_ok` reports whether saved values validate; `web_setup_complete` reports only
+   whether the first-run wizard was completed. If status is `invalid_configuration`, report the
+   sanitized `issues` and open the same local settings console.
    Set `DOI2PDF_NETWORK_MODE` to `off_campus` when only OA/OpenAthens/API routes should run,
    or `campus` when institutional fallback and browser-assisted discovery are allowed.
    For `auto`, configure the institution's documented networks in `DOI2PDF_CAMPUS_CIDRS`;
@@ -46,7 +50,8 @@ out of prompts, command arguments, logs, and responses.
    profile and complete the check manually. Do not treat this as a CAPTCHA solver.
 7. After ordinary publisher and translator routes, reuse verified publisher selectors. If the
    user enabled LLM ranking, allow it to rank only sanitized Playwright candidates. It does not
-   authorize or validate a download. Remember a selector only after `%PDF-` validation; inspect
+   authorize or validate a download. Remember a selector only after bounded structural PDF
+   validation (header, EOF marker, readable page tree, and at least one page); inspect
    it with `doi2pdf rules --json`. Never retain a candidate URL or signed query string.
 8. If all automatic routes fail, return `resolver_url` for manual completion. Do not add an
    unauthorized fallback.

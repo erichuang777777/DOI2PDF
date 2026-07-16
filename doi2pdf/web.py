@@ -738,19 +738,28 @@ def institution_login() -> str:
 @app.get("/health")
 def health() -> JSONResponse:
     settings = _settings()
+    issues = settings.validate()
+    configuration_ok = not issues
+    setup_complete = settings.setup_complete
     with _JOB_LOCK:
         active_jobs = sum(job["state"] in {"queued", "running"} for job in _JOBS.values())
         recent_jobs = len(_JOBS)
     route_health = route_health_summary(settings.browser_profile / "access_log.jsonl")
     return JSONResponse({
-        "ok": not settings.needs_setup(), "version": __version__, "issues": settings.validate(),
-        "setup_complete": not settings.needs_setup(),
+        "ok": configuration_ok and setup_complete, "version": __version__, "issues": issues,
+        "status": "ready" if configuration_ok and setup_complete else ("invalid_configuration" if issues else "setup_required"),
+        "configuration_ok": configuration_ok,
+        "setup_complete": setup_complete,
         "network_mode": settings.normalized_network_mode(),
         "effective_network_mode": settings.effective_network_mode(),
         "jobs": {"active": active_jobs, "recent": recent_jobs},
         "library_login": {"state": _LOGIN_STATE.get("state", "idle"), "message": _redact(_LOGIN_STATE.get("message", ""))},
         "routes": {
+            "open_access": True,
             "unpaywall": bool(settings.unpaywall_email),
+            "openalex": True,
+            "pmc": True,
+            "arxiv": True,
             "zotero_translation_server": settings.translator_enabled,
             "openathens": bool(settings.openathens_redirector_prefix),
             "ezproxy": bool(settings.ezproxy_prefix or settings.ezproxy_suffix),

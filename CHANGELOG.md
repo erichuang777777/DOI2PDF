@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.1 - 2026-07-16
+
+- Made `doctor --json` distinguish a valid configuration from completed first-run setup,
+  and exposed always-available OpenAlex, PMC, and arXiv routes accurately.
+- Stream PDF and metadata responses with hard 100 MiB and 10 MiB bounds instead of loading
+  untrusted responses without a limit.
+- Validate the PDF header, final EOF marker, readable page tree, and nonzero page count before
+  writing or learning a publisher rule.
+- Applied equivalent declared-size and post-read checks to Playwright response capture.
+- Bounded the tested browser-use dependency to the compatible 0.13 series and added automated
+  dependency auditing plus weekly Dependabot checks for Python and GitHub Actions.
+
 ## 0.8.0 - 2026-07-16
 
 - Enforced explicit campus/off-campus retrieval policy. Auto mode enters campus mode only

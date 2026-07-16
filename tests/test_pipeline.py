@@ -1,13 +1,13 @@
 from pathlib import Path
 
 from doi2pdf.config import Settings
-from doi2pdf.http import PDF_MAGIC
+from tests._pdf import make_pdf
 from doi2pdf.models import Candidate
 from doi2pdf.pipeline import DOI2PDF
 from doi2pdf.institution import InstitutionResult
 
 
-PDF = PDF_MAGIC + b" test\n" + b"0" * 2048
+PDF = make_pdf()
 
 
 class FakeHttp:

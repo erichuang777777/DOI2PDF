@@ -15,11 +15,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install -e ".[web]" build pytest pyyaml ruff twine
+      - run: python -m pip install -e ".[web]" build pip-audit pytest pyyaml ruff twine
       - name: Verify release tag matches package version
         run: test "$GITHUB_REF_NAME" = "v$(python -c 'from doi2pdf import __version__; print(__version__)')"
       - run: ruff check doi2pdf tests
       - run: python -m pytest -q
+      - run: python -m pip_audit .
       - run: python -m build
       - run: python -m twine check dist/*
       - name: Package agent skill with its CLI wheel

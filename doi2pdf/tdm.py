@@ -6,7 +6,7 @@ import requests
 
 from ._version import __version__
 from .config import Settings
-from .http import looks_like_pdf
+from .http import pdf_validation_status, read_bounded_response
 
 
 class TDMResolver:
@@ -21,12 +21,21 @@ class TDMResolver:
 
     def _get(self, url: str, headers: dict[str, str]) -> tuple[bytes | None, str]:
         try:
-            response = self.session.get(url, headers=headers, timeout=max(5, self.settings.request_timeout_s))
+            response = self.session.get(url, headers=headers, timeout=max(5, self.settings.request_timeout_s), stream=True)
         except requests.RequestException as exc:
             return None, f"request_error:{exc.__class__.__name__}"
-        if response.status_code != 200:
-            return None, f"http_{response.status_code}"
-        return (response.content, "pdf") if looks_like_pdf(response.content) else (None, "not_pdf")
+        try:
+            if response.status_code != 200:
+                return None, f"http_{response.status_code}"
+            content, status = read_bounded_response(response)
+            if content is None:
+                return None, status
+            status = pdf_validation_status(content)
+            return (content, status) if status == "pdf" else (None, status)
+        finally:
+            close = getattr(response, "close", None)
+            if close:
+                close()
 
     def routes(self, doi: str):
         low = doi.lower()
