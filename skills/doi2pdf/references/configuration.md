@@ -76,6 +76,8 @@ process-separated from the Python client.
 
 ## Institutional access
 
+- `DOI2PDF_NETWORK_MODE`: `off_campus`, `campus`, or `auto`.
+- `DOI2PDF_CAMPUS_CIDRS`: comma-separated institution ranges used only by Auto mode.
 - `OPENATHENS_REDIRECTOR_PREFIX`: organization-specific prefix ending in `?url=`.
 - `EZPROXY_PREFIX`: the user's library prefix, or a template containing `{url}`/`{doi}`.
 - `EZPROXY_SUFFIX`: organization-issued publisher-host suffix; enables all paper-fetch routes.
@@ -91,6 +93,11 @@ process-separated from the Python client.
 Do not copy another institution's endpoint. Keep institutional passwords only in the ignored
 local environment; never render them or place them in command arguments. Do not automate
 CAPTCHA, OpenAthens/Shibboleth SSO, or MFA.
+
+Off-campus mode permits OA, TDM APIs, and the user's configured OpenAthens session. It skips
+direct-campus, EZproxy, generic browser discovery, and form-login routes. Campus mode permits
+the direct and EZproxy fallbacks. Auto becomes campus only when a local interface address matches
+one of the user-configured CIDRs; otherwise it follows the off-campus policy.
 
 If the user has a link copied from their own library portal, run `doi2pdf library-detect URL
 --json` or use **Library Access Assistant**. Accept only HTTPS. The detector discards the article

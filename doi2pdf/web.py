@@ -92,13 +92,35 @@ async def enforce_local_origin(request: Request, call_next):
 
 
 API_HELP = {
-    "pubmed": ("Optional. Create it in My NCBI account settings.", "https://www.ncbi.nlm.nih.gov/account/settings/"),
+    "pubmed": ("Optional. Create it under API Key Management in My NCBI account settings.", "https://account.ncbi.nlm.nih.gov/settings/"),
     "semantic": ("Optional; public requests work without a key but may be throttled.", "https://www.semanticscholar.org/product/api"),
     "elsevier": ("Register your own key; full-text entitlement still depends on your licence.", "https://dev.elsevier.com/"),
     "wiley": ("Accept Wiley's TDM terms to receive a personal access token.", "https://onlinelibrary.wiley.com/library-info/resources/text-and-datamining"),
     "springer": ("Register in Springer Nature API Management.", "https://dev.springernature.com/docs/quick-start/api-access/"),
     "unpaywall": ("No key is required; Unpaywall asks for a real contact email.", "https://unpaywall.org/products/api"),
 }
+NETWORK_MODE_HELP = {
+    "auto": "Detect configured campus IP ranges; otherwise use OA/API and OpenAthens only.",
+    "off_campus": "Use OA, OpenAthens, and official APIs only; skip direct-campus and EZproxy routes.",
+    "campus": "Use OA/API first, then direct campus access, EZproxy, and browser-assisted discovery.",
+}
+
+
+def _network_mode_field(settings: Settings) -> str:
+    current = settings.normalized_network_mode()
+    options = "".join(
+        f'<option value="{value}" {"selected" if value == current else ""}>{html.escape(label)}</option>'
+        for value, label in (
+            ("auto", "Auto — match configured campus IP ranges"),
+            ("off_campus", "Off-campus — OA / OpenAthens / API only"),
+            ("campus", "Campus — allow institutional fallback and browser assist"),
+        )
+    )
+    return (
+        '<label>Network mode</label>'
+        f'<select name="DOI2PDF_NETWORK_MODE">{options}</select>'
+        f'<p class="muted">{html.escape(NETWORK_MODE_HELP[current])}</p>'
+    )
 
 
 @app.middleware("http")
@@ -160,22 +182,20 @@ def _application_help(provider: str, label: str = "Official application instruct
 
 
 def _write_env(updates: dict[str, str]) -> None:
-    existing: dict[str, str] = {}
-    order: list[str] = []
-    if ENV_PATH.exists():
-        for raw in ENV_PATH.read_text(encoding="utf-8").splitlines():
-            if raw and not raw.lstrip().startswith("#") and "=" in raw:
-                key, value = raw.split("=", 1)
-                existing[key.strip()] = value
-                order.append(key.strip())
+    from dotenv import dotenv_values, set_key
+
+    existing = {key: value or "" for key, value in dotenv_values(ENV_PATH).items()} if ENV_PATH.exists() else {}
+    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ENV_PATH.touch(exist_ok=True)
     for key, value in updates.items():
         # Blank secret fields mean "keep existing"; ordinary fields can be cleared.
-        if value or key not in SECRET_ENV_KEYS or key not in existing:
-            existing[key] = value.replace("\r", "").replace("\n", "")
-        if key not in order:
-            order.append(key)
-    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ENV_PATH.write_text("\n".join(f"{key}={existing[key]}" for key in order) + "\n", encoding="utf-8")
+        if not value and key in SECRET_ENV_KEYS and key in existing:
+            continue
+        clean = value.replace("\r", "").replace("\n", "")
+        # python-dotenv performs the escaping, so spaces, #, quotes, and Windows
+        # paths round-trip instead of being silently truncated on the next run.
+        set_key(str(ENV_PATH), key, clean, quote_mode="always")
+        existing[key] = clean
     try:
         ENV_PATH.chmod(0o600)
     except OSError as exc:
@@ -225,7 +245,7 @@ def _redact(value: str) -> str:
         secret = os.getenv(key, "")
         if secret:
             text = text.replace(secret, "[redacted]")
-    return text
+    return re.sub(r"https?://\S+", "[redacted-url]", text, flags=re.I)
 
 
 def _job_event(job_id: str, event: dict[str, Any], *, state: str | None = None) -> None:
@@ -284,10 +304,11 @@ def _job_snapshot(job: dict[str, Any]) -> dict[str, Any]:
 
 def _route_status(settings: Settings) -> str:
     entries = (
-        ("Open access", bool(settings.unpaywall_email), "Unpaywall, OpenAlex, Europe PMC"),
+        ("Open access", bool(settings.unpaywall_email), "Unpaywall, OpenAlex, PMC Cloud, Europe PMC"),
         ("Publisher APIs", bool(settings.elsevier_api_key or settings.wiley_tdm_token or settings.springer_api_key), "Optional Elsevier, Wiley, Springer keys"),
-        ("Library access", bool(settings.openathens_redirector_prefix or settings.ezproxy_prefix or settings.ezproxy_suffix), "Your OpenAthens or EZproxy"),
+        ("Library access", settings.allow_institutional_fallback(), "OpenAthens off campus; direct/EZproxy on campus"),
         ("Manual resolver", bool(settings.resolver_template), "SFX/OpenURL fallback"),
+        ("Network mode", True, f"{settings.effective_network_mode()} · {NETWORK_MODE_HELP[settings.normalized_network_mode()]}"),
     )
     return '<div class="grid">' + "".join(
         f'<div class="status"><strong>{"✓" if ready else "○"} {html.escape(name)}</strong><span class="muted">{html.escape(detail)}</span></div>'
@@ -310,7 +331,7 @@ def home():
 <label for="identifier">DOI, PMID, DOI URL, or exact title</label><input id="identifier" name="identifier" required autofocus placeholder="10.1186/s12984-023-01168-x">
 <label for="output_dir">Save folder</label><input id="output_dir" name="output_dir" value="{html.escape(str(settings.download_dir), quote=True)}">
 <details><summary>Optional Zotero filename</summary><label for="zotero_key">Zotero item key</label><input id="zotero_key" name="zotero_key" maxlength="8" placeholder="9ET75JMH"></details>
-<label class="check"><input type="checkbox" name="use_institution" value="1" checked> Use my configured OpenAthens/EZproxy session after OA and TDM routes</label>
+<label class="check"><input type="checkbox" name="use_institution" value="1" {"checked" if settings.allow_institutional_fallback() else ""}> Use my configured OpenAthens/EZproxy session after OA and TDM routes</label>
 <button type="submit">Retrieve PDF</button></form></section>
 <section class="card"><h2>Safety</h2><p>This tool uses public OA sources, official publisher APIs, and your own authorized library session. It does not bypass paywalls or share credentials. Institutional retrieval is serialized, delayed, and daily-limited.</p><p class="muted">Automating even your own authorized session can still be restricted by a publisher's or your institution's terms of service. Confirm your library's and publishers' policies permit automated retrieval before enabling institutional access, and stop if asked to by your library.</p></section>
 <div id="working"><div><div class="spinner"></div><h2>Starting the live tracker…</h2><p class="muted">The progress page will show each lawful retrieval layer as it runs.</p></div></div>
@@ -329,6 +350,8 @@ def setup() -> str:
 {_application_help("unpaywall", "Why Unpaywall asks for this")}
 <label>Where should PDFs be saved?</label><input name="DOWNLOAD_DIR" value="{html.escape(str(settings.download_dir), quote=True)}" placeholder="downloads"></section>
 <section class="card"><h2>2. Library access (optional)</h2><p>Open-access papers work without this section. For subscribed papers, paste the prefix supplied by your own library. Never enter your library password here.</p>
+{_network_mode_field(settings)}
+<label>Campus IP ranges (optional)</label><input name="DOI2PDF_CAMPUS_CIDRS" value="{html.escape(','.join(settings.campus_cidrs), quote=True)}" placeholder="140.112.0.0/16"><p class="muted">Used only by Auto mode. Separate multiple CIDR ranges with commas.</p>
 <label>OpenAthens redirector prefix</label><input name="OPENATHENS_REDIRECTOR_PREFIX" value="{html.escape(settings.openathens_redirector_prefix, quote=True)}" placeholder="https://go.openathens.net/redirector/YOUR-DOMAIN?url=">
 <p class="muted">Usually found in your library portal or OpenAthens Redirector link generator.</p>
 <label>EZproxy login prefix</label><input name="EZPROXY_PREFIX" value="{html.escape(settings.ezproxy_prefix, quote=True)}" placeholder="https://login.yourlibrary.edu/login?url=">
@@ -356,6 +379,8 @@ async def save_setup(request: Request):
         contact_email=email,
         unpaywall_email=email,
         setup_complete=True,
+        network_mode=form.get("DOI2PDF_NETWORK_MODE", "auto").strip() or "auto",
+        campus_cidrs=tuple(part.strip() for part in form.get("DOI2PDF_CAMPUS_CIDRS", "").split(",") if part.strip()),
         openathens_redirector_prefix=form.get("OPENATHENS_REDIRECTOR_PREFIX", "").strip(),
         ezproxy_prefix=form.get("EZPROXY_PREFIX", "").strip(),
         resolver_template=form.get("LIBRARY_RESOLVER_TEMPLATE", "").strip(),
@@ -366,7 +391,7 @@ async def save_setup(request: Request):
     allowed = {
         "DOI2PDF_CONTACT_EMAIL", "DOWNLOAD_DIR", "PUBMED_API_KEY", "S2_API_KEY",
         "ELSEVIER_TDM_KEY", "ELSEVIER_INSTTOKEN", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
-        "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "LIBRARY_RESOLVER_TEMPLATE",
+        "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "LIBRARY_RESOLVER_TEMPLATE", "DOI2PDF_NETWORK_MODE", "DOI2PDF_CAMPUS_CIDRS",
     }
     updates = {key: value.strip() for key, value in form.items() if key in allowed}
     updates["UNPAYWALL_EMAIL"] = email
@@ -529,9 +554,9 @@ def acceptance() -> str:
         for item in corpus()
     )
     return _layout("Acceptance", f"""
-<h1>Live acceptance set</h1><p class="muted">These are real publisher records that DOI2PDF did not retrieve from this machine without subscription access on 15 July 2026. Run them one at a time after signing in to your own institution. This is deliberately not a bulk test.</p>
+<h1>Live acceptance set</h1><p class="muted">These are real publisher records with known OA successes, PMC edge cases, and subscription controls checked on 16 July 2026. Run them one at a time; institutional controls require your own legitimate access. This is deliberately not a bulk test.</p>
 <section class="card"><table><thead><tr><th>Source</th><th>Paper</th><th>Why included</th><th>Test</th></tr></thead><tbody>{rows}</tbody></table></section>
-<section class="card"><p><strong>Interpretation:</strong> subscription cases test your authorized OpenAthens/EZproxy route. OA discovery-gap cases test whether metadata or publisher routes need improvement; they are not evidence of a paywall.</p></section>""")
+<section class="card"><p><strong>Interpretation:</strong> subscription cases test your authorized OpenAthens/EZproxy route. OA rows should succeed without it. A PMC record may provide reusable full text without providing an article PDF; that is not evidence that Nature subscription access exists.</p></section>""")
 
 
 @app.get("/routes", response_class=HTMLResponse)
@@ -600,6 +625,8 @@ def configure() -> str:
 <label>OpenAI-compatible base URL</label><input name="DOI2PDF_LLM_BASE_URL" value="{html.escape(settings.llm_base_url, quote=True)}" placeholder="https://provider.example/v1 or http://127.0.0.1:11434/v1">
 <label>Model</label><input name="DOI2PDF_LLM_MODEL" value="{html.escape(settings.llm_model, quote=True)}">
 {_secret_field("LLM API key", "DOI2PDF_LLM_API_KEY", bool(settings.llm_api_key))}</details>
+{_network_mode_field(settings)}
+<label>Campus IP ranges (optional)</label><input name="DOI2PDF_CAMPUS_CIDRS" value="{html.escape(','.join(settings.campus_cidrs), quote=True)}" placeholder="140.112.0.0/16"><p class="muted">Used only by Auto mode. Separate multiple CIDR ranges with commas.</p>
 <label>OpenAthens redirector prefix</label><input name="OPENATHENS_REDIRECTOR_PREFIX" value="{html.escape(settings.openathens_redirector_prefix, quote=True)}" placeholder="https://go.openathens.net/redirector/YOUR-DOMAIN?url=">
 <label>EZproxy prefix/template</label><input name="EZPROXY_PREFIX" value="{html.escape(settings.ezproxy_prefix, quote=True)}">
 <label>EZproxy publisher-host suffix</label><input name="EZPROXY_SUFFIX" value="{html.escape(settings.ezproxy_suffix, quote=True)}" placeholder="ezproxy.example.edu"><p class="muted">Optional. Enables the original publisher-specific template, metadata, and LWW/Ovid routes.</p>
@@ -626,7 +653,7 @@ async def save_configuration(request: Request):
     allowed = {
         "DOI2PDF_CONTACT_EMAIL", "UNPAYWALL_EMAIL", "DOWNLOAD_DIR", "PUBMED_API_KEY", "S2_API_KEY",
         "ELSEVIER_TDM_KEY", "ELSEVIER_INSTTOKEN", "WILEY_TDM_TOKEN", "SPRINGER_API_KEY",
-        "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "EZPROXY_SUFFIX", "LIBRARY_RESOLVER_TEMPLATE",
+        "OPENATHENS_REDIRECTOR_PREFIX", "EZPROXY_PREFIX", "EZPROXY_SUFFIX", "LIBRARY_RESOLVER_TEMPLATE", "DOI2PDF_NETWORK_MODE", "DOI2PDF_CAMPUS_CIDRS",
         "HOLDINGS_DB", "PAPER_RADAR_DB",
         "LIBRARY_LOGIN_URL", "LIBRARY_USERNAME", "LIBRARY_PASSWORD", "LIBRARY_USER_SELECTOR",
         "LIBRARY_PASSWORD_SELECTOR", "LIBRARY_SUBMIT_SELECTOR",
@@ -639,6 +666,8 @@ async def save_configuration(request: Request):
         contact_email=updates.get("DOI2PDF_CONTACT_EMAIL", ""),
         unpaywall_email=updates.get("UNPAYWALL_EMAIL", ""),
         setup_complete=True,
+        network_mode=updates.get("DOI2PDF_NETWORK_MODE", "auto"),
+        campus_cidrs=tuple(part.strip() for part in updates.get("DOI2PDF_CAMPUS_CIDRS", "").split(",") if part.strip()),
         openathens_redirector_prefix=updates.get("OPENATHENS_REDIRECTOR_PREFIX", ""),
         ezproxy_prefix=updates.get("EZPROXY_PREFIX", ""),
         ezproxy_suffix=updates.get("EZPROXY_SUFFIX", ""),
@@ -716,6 +745,8 @@ def health() -> JSONResponse:
     return JSONResponse({
         "ok": not settings.needs_setup(), "version": __version__, "issues": settings.validate(),
         "setup_complete": not settings.needs_setup(),
+        "network_mode": settings.normalized_network_mode(),
+        "effective_network_mode": settings.effective_network_mode(),
         "jobs": {"active": active_jobs, "recent": recent_jobs},
         "library_login": {"state": _LOGIN_STATE.get("state", "idle"), "message": _redact(_LOGIN_STATE.get("message", ""))},
         "routes": {

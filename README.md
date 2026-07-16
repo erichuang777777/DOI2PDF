@@ -1,5 +1,7 @@
 # DOI2PDF
 
+See [CHANGELOG.md](CHANGELOG.md) for release changes and known access constraints.
+
 DOI2PDF combines Zotero PDF Hunter, the lawful route ladder from paper-fetch, and Zotero
 translation-server metadata into one provenance-aware tool.
 
@@ -9,8 +11,8 @@ The audited upstream-to-DOI2PDF function checklist is maintained in
 It tries, in order:
 
 1. **Open access** — every Unpaywall OA location, Semantic Scholar `openAccessPdf`, every
-   OpenAlex location, Crossref `link` full-text entries, PMC→Europe PMC rendering, the
-   direct NCBI PMC front end, arXiv, an optional CORE lookup (needs a free `CORE_API_KEY`),
+   OpenAlex location, Crossref `link` full-text entries, the current anonymous PMC AWS
+   dataset, PMC→Europe PMC rendering, the direct NCBI PMC front end, arXiv, an optional CORE lookup (needs a free `CORE_API_KEY`),
    DOAJ, and repository `citation_pdf_url`.
 2. **Publisher TDM APIs** — Elsevier, Wiley, and Springer using credentials registered by
    the user with those publishers.
@@ -26,7 +28,7 @@ to a private, loopback, or link-local address (checked on every redirect hop, no
 first), since candidate URLs originate from external indexes.
 
 The institutional layer includes the complete paper-fetch v1.0 publisher registry: direct
-PDF templates, `citation_pdf_url`, headed Cloudflare navigation, and the LWW/Ovid signed-URL
+PDF templates, `citation_pdf_url`, visible human-assisted verification, and the LWW/Ovid signed-URL
 plus OCE fallback. A read-only holdings SQLite check distinguishes missing entitlement from
 a broken route, while sanitized route-health counters expose blocks and subscribed prefixes
 that still lack a route.
@@ -44,7 +46,8 @@ doi2pdf doctor --json
 ```
 
 Use `--with-browser` on the installer only when the user needs authorized OpenAthens/EZproxy
-access. Agents call the global `doi2pdf` command and parse one JSON envelope from stdout.
+access or browser-assisted verification; it installs Playwright, browser-use, and Chromium.
+Agents call the global `doi2pdf` command and parse one JSON envelope from stdout.
 If setup is required, they launch `doi2pdf-web`; API keys are entered only in the local HTML
 page, stored in the ignored `.env`, and never rendered back to the browser or agent.
 
@@ -58,6 +61,9 @@ The local-only console provides five operational views:
 - **Acceptance** offers 5–10 real publisher papers for deliberate, one-at-a-time tests with
   the user's own institutional access; it never launches a bulk run.
 - **Settings** manages environment configuration without rendering stored API-key values.
+- **Network mode** selects whether DOI2PDF stays on OA/OpenAthens/API only or may fall
+  back to institutional browser routes on campus; `auto` compares local interface addresses
+  with user-configured campus CIDR ranges.
 - Every supported API field links directly to its official registration or access instructions.
 - **Library Access Assistant** infers OpenAthens/EZproxy settings from one link copied from the
   user's own library portal, then opens visible login without a terminal prompt.
@@ -72,7 +78,7 @@ concurrently; institutional requests retain their separate persistent rate limit
 ## One-click Windows app
 
 Double-click **`DOI2PDF.bat`**. On the first run it creates an isolated environment,
-installs DOI2PDF and Chromium, copies the local settings template, starts the server on
+installs DOI2PDF, browser-use, and Chromium, copies the local settings template, starts the server on
 `127.0.0.1`, and opens a guided browser setup. Enter a real contact email, choose the PDF
 folder, and optionally add your own library access links or publisher API keys. Later starts
 reuse the installation and go directly to retrieval.
@@ -162,9 +168,10 @@ doi2pdf --json zotero-attach --db "$HOME\Zotero\zotero.sqlite" --log playwright-
 Every batch writes a sanitized, resumable JSONL journal inside the ignored browser profile.
 `--resume` skips prior successes and failures; add `--retry-failed` to retry failures while
 still skipping successes. `manual-review` converts the latest failures into a local HTML page.
-`batch-zotero` warms OpenAlex's cache for the whole batch up front using its free multi-DOI
-filter endpoint, instead of one OpenAlex request per item; other OA sources have no free
-batch endpoint and are still queried per DOI.
+`batch-zotero` now groups items by publisher/route label so different targets can run in
+parallel while the same publisher stays serial. It does an OA/TDM-first pass with
+OpenAlex prefetching per group, then only sends the remaining failures to institutional
+access if you allow it. OA hits skip the institution layer entirely.
 `zotero-attach` is dry-run by default, requires explicit `--write --yes`, refuses to write
 while Zotero is running, validates the PDF header, and creates a timestamped database backup.
 
@@ -224,6 +231,14 @@ Set it as `OPENATHENS_REDIRECTOR_PREFIX`, run `doi2pdf login`, and complete SSO/
 visible Chromium window. For EZproxy, set your own library's login prefix or a template
 containing `{url}`. DOI2PDF never ships another institution's endpoints.
 
+If you are off campus, keep `DOI2PDF_NETWORK_MODE=off_campus` so DOI2PDF stops after OA,
+OpenAthens, and official APIs. On campus, set `DOI2PDF_NETWORK_MODE=campus` to allow the
+institutional fallback layer, including direct publisher access, EZproxy, and browser-assisted
+discovery. For automatic detection, set `DOI2PDF_NETWORK_MODE=auto` and add your institution's
+documented ranges to `DOI2PDF_CAMPUS_CIDRS` (for example `140.112.0.0/16`). If no configured
+range matches, Auto behaves as off-campus; merely configuring EZproxy does not prove the machine
+is on campus.
+
 If you do not know the prefix, open **Library Access Assistant** in Settings and paste one
 database or full-text link copied from your own library portal. It recognizes common
 OpenAthens/EZproxy formats, removes the article target, and shows the inferred setting for
@@ -235,6 +250,21 @@ Set `EZPROXY_SUFFIX` when your library uses rewritten publisher hosts such as
 registry. Plain EZproxy/NetScaler login forms may optionally use `LIBRARY_LOGIN_URL`,
 `LIBRARY_USERNAME`, `LIBRARY_PASSWORD`, and CSS selectors stored only in the ignored `.env`.
 OpenAthens/Shibboleth, CAPTCHA, and MFA always remain interactive in visible Chromium.
+
+If a publisher's page immediately drops you into a bot-verification screen, use the
+browser-use assist mode to open the exact institutional URL in your local browser profile and
+finish the check manually:
+
+```powershell
+doi2pdf browser-assist https://www.nejm.org/doi/pdf/10.1056/NEJMoa2600157
+```
+
+This is a pause-for-human-action helper, not a CAPTCHA solver. It keeps the browser visible,
+lets you click through the challenge yourself, and then reuses the same profile state on the
+next `doi2pdf fetch`.
+The skill installer includes browser-use with `--with-browser`. In a source checkout, install
+all browser components with `pip install -e ".[browser,browser_use,web]"` and then run
+`playwright install chromium`.
 
 For entitlement diagnostics, point `HOLDINGS_DB` at a read-only SQLite database containing:
 

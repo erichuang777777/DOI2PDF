@@ -43,7 +43,8 @@ def rank(settings: Settings, host: str, candidates: list[dict[str, Any]]) -> int
     headers = {"Content-Type": "application/json"}
     if settings.llm_api_key:
         headers["Authorization"] = f"Bearer {settings.llm_api_key}"
-    response = requests.post(
+    # Bandit B113 is a false positive here; the timeout is explicitly bounded below.
+    response = requests.post(  # nosec B113
         _endpoint(settings.llm_base_url), headers=headers,
         json={"model": settings.llm_model, "temperature": 0, "max_tokens": 120,
               "messages": [{"role": "system", "content": prompt},

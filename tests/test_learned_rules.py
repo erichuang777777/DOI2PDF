@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 from doi2pdf.learned_rules import RuleStore

@@ -7,6 +7,7 @@ This matrix is the completeness contract between upstream paper-fetch v1.0 and D
 | Unpaywall all locations | `OpenAccessResolver.unpaywall` | Integrated |
 | Semantic Scholar `openAccessPdf` | `OpenAccessResolver.semantic_scholar` | Integrated |
 | DOI-to-PMC-to-Europe PMC | current NCBI ID Converter plus Europe PMC candidate | Integrated and endpoint updated |
+| PMC article dataset | 2026 versioned `pmc-oa-opendata` metadata plus anonymous HTTPS PDF retrieval | Integrated; legacy FTP/package route retired |
 | repository `citation_pdf_url` | shared HTTP and institutional metadata routes | Integrated |
 | paper-radar SQLite fallback | `PAPER_RADAR_DB`, read-only | Integrated |
 | arXiv DOI and DOI metadata search | direct arXiv mapping plus Atom API search | Integrated from Zotero PDF Hunter |

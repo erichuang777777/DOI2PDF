@@ -25,8 +25,32 @@ def test_openathens_target_is_percent_encoded():
     assert url.endswith("https%3A%2F%2Fdoi.org%2F10.1002%2Ftest")
 
 
+def test_off_campus_allows_openathens_but_not_ezproxy():
+    openathens = Settings(
+        network_mode="off_campus",
+        openathens_redirector_prefix="https://go.openathens.net/redirector/example.edu?url=",
+    )
+    assert openathens.allow_institutional_fallback()
+    assert InstitutionalBrowser(openathens)._family() == "openathens"
+    ezproxy = Settings(network_mode="off_campus", ezproxy_prefix="https://login.example.edu/login?url=")
+    assert not ezproxy.allow_institutional_fallback()
+    assert InstitutionalBrowser(ezproxy)._family() is None
+
+
+def test_campus_mode_supports_direct_publisher_routes_without_proxy():
+    browser = InstitutionalBrowser(Settings(network_mode="campus"))
+    assert browser._family() == "campus"
+    assert browser._route_entry_url("10.1056/NEJMoa1", route_for("10.1056/NEJMoa1")) == "https://www.nejm.org/doi/pdf/10.1056/NEJMoa1"
+
+
+def test_auto_mode_detects_configured_campus_network(monkeypatch):
+    monkeypatch.setattr("doi2pdf.config._local_ip_addresses", lambda: {"140.112.25.8"})
+    assert Settings(network_mode="auto", campus_cidrs=("140.112.0.0/16",)).effective_network_mode() == "campus"
+    assert Settings(network_mode="auto", campus_cidrs=("10.0.0.0/8",)).effective_network_mode() == "off_campus"
+
+
 def test_ezproxy_suffix_enables_original_publisher_routes():
-    browser = InstitutionalBrowser(Settings(ezproxy_suffix="proxy.example.edu"))
+    browser = InstitutionalBrowser(Settings(network_mode="campus", ezproxy_suffix="proxy.example.edu"))
     assert browser._route_entry_url("10.1056/NEJMoa1", route_for("10.1056/NEJMoa1")) == "https://www-nejm-org.proxy.example.edu/doi/pdf/10.1056/NEJMoa1"
     meta = route_for("10.3174/ajnr.1")
     assert browser._route_entry_url("10.3174/ajnr.1", meta) == "https://www-ajnr-org.proxy.example.edu/lookup/doi/10.3174/ajnr.1"
@@ -73,11 +97,11 @@ def test_placeholder_email_requires_first_run_setup():
 
 def test_library_login_must_be_https():
     settings = Settings(contact_email="a@example.org", library_login_url="http://login.example.org")
-    assert "LIBRARY_LOGIN_URL must start with https://" in settings.validate()
+    assert "LIBRARY_LOGIN_URL must be an absolute https:// URL." in settings.validate()
 
 
 def test_web_login_mode_is_forwarded_without_terminal_prompt(monkeypatch):
-    browser = InstitutionalBrowser(Settings(ezproxy_prefix="https://login.example.edu/login?url="))
+    browser = InstitutionalBrowser(Settings(network_mode="campus", ezproxy_prefix="https://login.example.edu/login?url="))
     recorded = {}
 
     def browse(url, doi, spec, login_only=False, wait_for_console=True):
@@ -123,6 +147,10 @@ def test_validated_learned_selector_is_reused_and_promoted(tmp_path):
             pass
 
         @staticmethod
+        def content():
+            return '<html><a href="/paper.pdf">Download PDF</a></html>'
+
+        @staticmethod
         def locator(selector):
             class First:
                 first = Locator()
@@ -133,6 +161,28 @@ def test_validated_learned_selector_is_reused_and_promoted(tmp_path):
     content, status = browser._generic_or_meta(Page(), Context(), [], "10.1/example", None)
     assert content.startswith(b"%PDF-") and status == "pdf_learned_rule"
     assert browser.rules.list()[0]["status"] == "verified"
+
+
+def test_cloudflare_challenge_is_reported_explicitly():
+    class Page:
+        url = "https://www.nejm.org/doi/pdf/10.1056/NEJMoa2600157"
+
+        @staticmethod
+        def wait_for_timeout(value):
+            pass
+
+        @staticmethod
+        def content():
+            return "Performing security verification"
+
+        @staticmethod
+        def title():
+            return "Just a moment..."
+
+    browser = InstitutionalBrowser(Settings())
+    content, status = browser._generic_or_meta(Page(), type("Context", (), {"request": None})(), [], "10.1056/NEJMoa2600157", None)
+    assert content is None
+    assert status == "cf_challenge"
 
 
 def test_llm_endpoint_requires_https_or_loopback():

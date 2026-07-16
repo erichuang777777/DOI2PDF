@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-import xml.etree.ElementTree as ET
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
+from defusedxml import ElementTree as ET
+
+from ._version import __version__
 from .config import Settings
 from .http import HttpClient
 from .models import Candidate
@@ -97,7 +100,9 @@ class OpenAccessResolver:
         unique = [doi.lower() for doi in dict.fromkeys(dois) if doi]
         for start in range(0, len(unique), chunk_size):
             chunk = unique[start:start + chunk_size]
-            filter_value = "|".join(quote(doi, safe="") for doi in chunk)
+            # `requests` encodes params once. Pre-quoting here double-encoded
+            # slashes as `%252F`, causing OpenAlex to miss otherwise valid DOIs.
+            filter_value = "|".join(chunk)
             try:
                 data = self.http.get_json(
                     "https://api.openalex.org/works",
@@ -133,8 +138,9 @@ class OpenAccessResolver:
             data = self.http.get_json("https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/", params=params)
             pmcid = None
             for record in data.get("records") or []:
-                if record.get("pmcid"):
-                    pmcid = record["pmcid"].upper()
+                value = str(record.get("pmcid") or "").upper()
+                if re.fullmatch(r"PMC\d+", value):
+                    pmcid = value
                     break
             self._pmcid_cache[doi] = pmcid
             return pmcid
@@ -148,11 +154,61 @@ class OpenAccessResolver:
         pmcid = self._pmcid(doi)
         return [Candidate(f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/", "pmc_direct", "open_access")] if pmcid else []
 
+    def pmc_cloud(self, doi: str) -> list[Candidate]:
+        """Resolve a reusable PMC PDF through the current anonymous AWS dataset.
+
+        PMC's 2026 dataset layout is versioned by PMCID.  Listing only the
+        exact PMCID prefix is bounded, then each version's metadata tells us
+        whether automated retrieval is permitted and supplies the PDF object.
+        """
+        pmcid = self._pmcid(doi)
+        if not pmcid:
+            return []
+        bucket = "https://pmc-oa-opendata.s3.amazonaws.com"
+        content = self.http.get_content(
+            f"{bucket}/",
+            params={"list-type": "2", "prefix": f"{pmcid}.", "delimiter": "/"},
+        )
+        root = ET.fromstring(content)
+        prefixes = {
+            node.text.rstrip("/")
+            for node in root.findall(".//{http://s3.amazonaws.com/doc/2006-03-01/}CommonPrefixes/"
+                                     "{http://s3.amazonaws.com/doc/2006-03-01/}Prefix")
+            if node.text and re.fullmatch(rf"{pmcid}\.\d+/", node.text)
+        }
+        candidates: list[Candidate] = []
+        for prefix in sorted(prefixes, key=lambda value: int(value.rsplit(".", 1)[1]), reverse=True):
+            try:
+                metadata = self.http.get_json(f"{bucket}/{prefix}/{prefix}.json")
+            except Exception:
+                continue
+            metadata_doi = str(metadata.get("doi") or "").lower()
+            if metadata_doi and metadata_doi != doi.lower():
+                continue
+            if not (metadata.get("is_pmc_openaccess") or metadata.get("is_manuscript")):
+                continue
+            pdf_url = str(metadata.get("pdf_url") or "")
+            parts = urlsplit(pdf_url)
+            if parts.scheme != "s3" or parts.hostname != "pmc-oa-opendata" or not parts.path.endswith(".pdf"):
+                continue
+            url = f"{bucket}{parts.path}"
+            if parts.query:
+                url += f"?{parts.query}"
+            candidates.append(
+                Candidate(
+                    url,
+                    "pmc_cloud",
+                    "open_access",
+                    metadata={"pmcid": pmcid, "license": metadata.get("license_code")},
+                )
+            )
+        return _unique(candidates)
+
     def crossref_links(self, doi: str) -> list[Candidate]:
         """Crossref publishes direct full-text links for many OA publishers (PLOS, MDPI, Hindawi, ...)."""
         data = self.http.get_json(
             f"https://api.crossref.org/works/{quote(doi, safe='/')}",
-            headers={"User-Agent": f"DOI2PDF/0.1 (mailto:{self.settings.contact_email})"} if self.settings.contact_email else {},
+            headers={"User-Agent": f"DOI2PDF/{__version__} (mailto:{self.settings.contact_email})"} if self.settings.contact_email else {},
         )
         message = data.get("message") or {}
         candidates = [
@@ -234,6 +290,7 @@ class OpenAccessResolver:
             ("semantic_scholar", self.semantic_scholar),
             ("openalex", self.openalex),
             ("crossref_links", self.crossref_links),
+            ("pmc_cloud", self.pmc_cloud),
             ("europe_pmc", self.europe_pmc),
             ("europe_pmc_search", self.europe_pmc_search),
             ("pmc_direct", self.pmc_direct),
@@ -257,6 +314,6 @@ class OpenAccessResolver:
                 try:
                     results[name] = future.result()
                 except Exception as exc:
-                    errors.append((name, f"{exc.__class__.__name__}: {exc}"))
+                    errors.append((name, exc.__class__.__name__))
         candidates = [candidate for name, _ in order for candidate in results.get(name, [])]
         return _unique(candidates), errors

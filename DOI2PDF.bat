@@ -18,14 +18,14 @@ if not exist ".venv\Scripts\python.exe" (
   if errorlevel 1 goto :failed
 )
 
-if not exist ".venv\.doi2pdf-installed" (
+if not exist ".venv\.doi2pdf-installed-0.8.0" (
   echo [DOI2PDF] Installing the application and browser support...
   ".venv\Scripts\python.exe" -m pip install --upgrade pip
-  ".venv\Scripts\python.exe" -m pip install -e ".[browser,web]"
+  ".venv\Scripts\python.exe" -m pip install -e ".[browser,browser_use,web]"
   if errorlevel 1 goto :failed
   ".venv\Scripts\python.exe" -m playwright install chromium
   if errorlevel 1 goto :failed
-  type nul > ".venv\.doi2pdf-installed"
+  type nul > ".venv\.doi2pdf-installed-0.8.0"
 )
 
 if not exist ".env" copy /y ".env.example" ".env" >nul

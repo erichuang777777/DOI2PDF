@@ -43,20 +43,32 @@ def test_setup_explains_required_and_optional_fields(monkeypatch):
     assert "Never enter your library password" in page
     assert "Official application instructions" in page
     assert "dev.elsevier.com" in page
+    assert 'name="DOI2PDF_NETWORK_MODE"' in page
 
 
 def test_write_env_preserves_secret_when_blank(tmp_path: Path, monkeypatch):
+    from dotenv import dotenv_values
+
     env = tmp_path / ".env"
     env.write_text("PUBMED_API_KEY=keep-me\nUNPAYWALL_EMAIL=old@example.org\n", encoding="utf-8")
     monkeypatch.setattr(web, "ENV_PATH", env)
     monkeypatch.setenv("PUBMED_API_KEY", "old-process-value")
     monkeypatch.setenv("UNPAYWALL_EMAIL", "old@example.org")
     web._write_env({"PUBMED_API_KEY": "", "UNPAYWALL_EMAIL": "new@example.org"})
-    content = env.read_text(encoding="utf-8")
-    assert "PUBMED_API_KEY=keep-me" in content
-    assert "UNPAYWALL_EMAIL=new@example.org" in content
+    values = dotenv_values(env)
+    assert values["PUBMED_API_KEY"] == "keep-me"
+    assert values["UNPAYWALL_EMAIL"] == "new@example.org"
     assert web.os.environ["PUBMED_API_KEY"] == "keep-me"
     assert web.os.environ["UNPAYWALL_EMAIL"] == "new@example.org"
+
+
+def test_write_env_round_trips_special_secret_characters(tmp_path: Path, monkeypatch):
+    from dotenv import dotenv_values
+
+    env = tmp_path / ".env"
+    monkeypatch.setattr(web, "ENV_PATH", env)
+    web._write_env({"LIBRARY_PASSWORD": "space # quote ' and \\ path"})
+    assert dotenv_values(env)["LIBRARY_PASSWORD"] == "space # quote ' and \\ path"
 
 
 def test_settings_pages_never_render_stored_api_keys(monkeypatch):
@@ -87,6 +99,7 @@ def test_settings_pages_never_render_stored_api_keys(monkeypatch):
     assert 'name="LIBRARY_PASSWORD" value=""' in pages
     assert 'name="LIBRARY_USERNAME" value=""' in pages
     assert 'name="DOI2PDF_LLM_API_KEY" value=""' in pages
+    assert 'name="DOI2PDF_NETWORK_MODE"' in pages
     assert "configured — leave blank to keep" in pages
 
 
@@ -99,6 +112,7 @@ def test_health_does_not_expose_secrets(monkeypatch):
     payload = json_from_response(web.health())
     assert "top-secret" not in str(payload)
     assert payload["version"]
+    assert payload["network_mode"] == "auto"
 
 
 def test_registered_pdf_can_be_served_inline_or_downloaded(tmp_path: Path):
@@ -147,13 +161,13 @@ def test_activity_and_progress_pages_are_live_console_views():
     assert "Recent route events" in web.activity()
     page = web.job_progress(job_id)
     assert "Retrieval progress" in page
-    assert f"/api/jobs/${{jobId}}" in page
+    assert "/api/jobs/${jobId}" in page
 
 
 def test_acceptance_page_offers_only_one_at_a_time_tests(monkeypatch):
     monkeypatch.setattr(web, "_settings", lambda: web.Settings(download_dir=Path("papers")))
     page = web.acceptance()
-    assert page.count("Try with my access") == 7
+    assert page.count("Try with my access") == len(web.corpus())
     assert 'name="use_institution" value="1"' in page
     assert "bulk test" in page
     assert "10.1056/NEJMoa2404512" in page
@@ -195,6 +209,7 @@ def test_configure_has_official_api_links_and_library_assistant(monkeypatch):
         assert host in page
     assert 'action="/library-detect"' in page
     assert "Nothing is saved until" in page
+    assert page.count('name="DOI2PDF_NETWORK_MODE"') == 1
 
 
 def test_library_detect_preview_never_renders_target_url():
@@ -222,9 +237,11 @@ def test_apply_detected_library_setting_writes_only_reviewed_prefix(tmp_path, mo
     monkeypatch.setattr(web, "ENV_PATH", env)
     response = asyncio.run(web.apply_library_detection(Request()))
     assert isinstance(response, RedirectResponse)
-    text = env.read_text(encoding="utf-8")
-    assert "EZPROXY_PREFIX=https://login.example.edu/login?url=" in text
-    assert "publisher" not in text
+    from dotenv import dotenv_values
+
+    values = dotenv_values(env)
+    assert values["EZPROXY_PREFIX"] == "https://login.example.edu/login?url="
+    assert "publisher" not in env.read_text(encoding="utf-8")
 
 
 def test_job_log_redacts_configured_secrets(monkeypatch):
@@ -236,6 +253,16 @@ def test_job_log_redacts_configured_secrets(monkeypatch):
     payload = json_from_response(web.job_status(job_id))
     assert "do-not-display" not in str(payload)
     assert "[redacted]" in str(payload)
+
+
+def test_job_log_redacts_signed_urls(monkeypatch):
+    with web._JOB_LOCK:
+        web._JOBS.clear()
+    job_id = web._new_job("10.1234/example")
+    web._job_event(job_id, {"percent": 50, "stage": "test", "message": "failed at https://publisher.example/pdf?token=secret"})
+    payload = json_from_response(web.job_status(job_id))
+    assert "token=secret" not in str(payload)
+    assert "[redacted-url]" in str(payload)
 
 
 class _Headers(dict):

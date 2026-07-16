@@ -11,7 +11,7 @@ def test_doctor_json_is_agent_ready_and_accepts_trailing_flag(capsys, monkeypatc
     monkeypatch.setattr(
         cli.Settings,
         "from_env",
-        lambda: Settings(contact_email="agent@example.org", unpaywall_email="agent@example.org"),
+        lambda: Settings(contact_email="agent@example.org", unpaywall_email="agent@example.org", network_mode="campus", openathens_redirector_prefix="https://go.openathens.net/redirector/example?url="),
     )
     assert cli.main(["doctor", "--json"]) == cli.EXIT_OK
     payload = json.loads(capsys.readouterr().out)
@@ -19,7 +19,10 @@ def test_doctor_json_is_agent_ready_and_accepts_trailing_flag(capsys, monkeypatc
     assert payload["status"] == "ready"
     assert payload["setup_command"] == "doi2pdf-web"
     assert payload["web_setup_complete"] is False
+    assert payload["network_mode"] == "campus"
+    assert payload["effective_network_mode"] == "campus"
     assert payload["routes"]["open_access"] is True
+    assert payload["routes"]["institution"] is True
 
 
 def test_invalid_identifier_json_stays_on_stdout(capsys, monkeypatch):
@@ -191,6 +194,55 @@ def test_batch_zotero_skips_prefetch_for_already_tried_items(tmp_path, monkeypat
     assert prefetch_calls == [["10.1/two"]]
 
 
+def test_batch_zotero_off_campus_skips_institution_phase(tmp_path, monkeypatch, capsys):
+    from doi2pdf.models import FetchResult
+
+    db = tmp_path / "zotero.sqlite"
+    db.touch()
+    items = [
+        {"key": "AAA1AAA1", "title": "One", "doi": "10.1/one", "year": "2020", "author": "Smith"},
+    ]
+
+    class FakeZoteroLibrary:
+        def __init__(self, path):
+            pass
+
+        def missing_pdfs(self, limit):
+            return items
+
+    class FakeOA:
+        def prefetch_openalex_batch(self, dois):
+            pass
+
+    fetch_calls = []
+
+    class FakeApp:
+        def __init__(self, settings):
+            self.oa = FakeOA()
+
+        def fetch(self, identifier, output, use_institution):
+            fetch_calls.append(use_institution)
+            return FetchResult(doi=identifier or "unknown", ok=False, path=output)
+
+    monkeypatch.setattr(cli, "ZoteroLibrary", FakeZoteroLibrary)
+    monkeypatch.setattr(cli, "DOI2PDF", FakeApp)
+    monkeypatch.setattr(
+        cli.Settings,
+        "from_env",
+        lambda: Settings(contact_email="agent@example.org", unpaywall_email="agent@example.org", network_mode="off_campus"),
+    )
+
+    assert cli.main([
+        "--json", "batch-zotero", "--db", str(db),
+        "--output-dir", str(tmp_path / "out"), "--log", str(tmp_path / "log.jsonl"),
+    ]) == cli.EXIT_NO_PDF
+
+    assert fetch_calls == [False]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["failed"] == 1
+    assert payload["results"][0]["ok"] is False
+
+
 def test_skill_installer_dry_run_uses_local_project():
     script = Path("skills/doi2pdf/scripts/install_cli.py")
     completed = subprocess.run(
@@ -203,3 +255,15 @@ def test_skill_installer_dry_run_uses_local_project():
     assert payload["dry_run"] is True
     assert payload["commands"][0][-1].endswith("[web]")
     assert Path(payload["target"]).name == Path.cwd().name
+
+
+def test_skill_installer_browser_mode_includes_browser_use():
+    script = Path("skills/doi2pdf/scripts/install_cli.py")
+    completed = subprocess.run(
+        [sys.executable, str(script), "--with-browser", "--dry-run", "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["commands"][0][-1].endswith("[web,browser,browser_use]")

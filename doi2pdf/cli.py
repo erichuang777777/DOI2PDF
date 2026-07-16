@@ -1,23 +1,30 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sqlite3
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 from .acceptance import corpus
 from .api_probe import probe_all
 from .batch_journal import append as append_batch_log
 from .batch_journal import attempted_keys, successful_entries as successful_log_entries, write_manual_review
+from .batch_plan import group_items as group_batch_items
+from .browser_assist import _safe_url as safe_browser_url
+from .browser_assist import open_url as browser_use_open_url
 from .config import Settings
 from .holdings import Holdings
 from .learned_rules import RuleStore
 from .library_detect import detect_library_link
 from .naming import build_pdf_path
 from .pipeline import DOI2PDF
-from .publisher_routes import ROUTES
+from .publisher_routes import ROUTES, route_for
 from .route_health import summary as health_summary
 from .zotero import ZoteroLibrary, find_zotero_db
 from .zotero_attach import attach_linked_pdfs, successful_csv_entries
@@ -92,6 +99,10 @@ def build_parser() -> argparse.ArgumentParser:
     rules.add_argument("--host", help="Filter rules by publisher hostname")
     rules.add_argument("--forget", metavar="HOST", help="Forget every learned selector for one hostname")
     rules.add_argument("--yes", action="store_true", help="Required non-interactive confirmation with --forget")
+    browser_assist = sub.add_parser("browser-assist", help="Open an institutional URL in browser-use and pause for manual verification")
+    browser_assist.add_argument("target", help="A DOI, DOI URL, or direct article/PDF URL")
+    browser_assist.add_argument("--headless", action="store_true", help="Launch browser-use headless (not recommended for verification)")
+    browser_assist.add_argument("--no-wait", action="store_true", help="Do not pause for manual verification")
     library_detect = sub.add_parser("library-detect", help="Infer OpenAthens/EZproxy settings from a library-provided link")
     library_detect.add_argument("url")
     review = sub.add_parser("manual-review", help="Create a local HTML review page for latest batch failures")
@@ -108,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         cases = corpus(args.publisher)
         payload = {
             "schema": 1, "ok": True, "command": "acceptance", "status": "ready",
-            "checked_without_access": "2026-07-15", "count": len(cases), "cases": cases,
+            "checked_without_access": "2026-07-16", "count": len(cases), "cases": cases,
         }
         _emit(args, payload, "\n".join(f"{row['publisher']}: {row['doi']} - {row['title']}" for row in cases))
         return EXIT_OK
@@ -187,6 +198,25 @@ def main(argv: list[str] | None = None) -> int:
         payload = {"schema": 1, "ok": True, "command": "library-detect", "status": "detected", **detection}
         _emit(args, payload, f"Detected {detection['label']}: {json.dumps(detection['updates'])}")
         return EXIT_OK
+    if args.command == "browser-assist":
+        try:
+            target = args.target
+            if not target.startswith(("http://", "https://")):
+                doi = app.identifiers.resolve(target)
+                target = app.institution._route_entry_url(doi, route_for(doi)) or app.institution.access_url(doi)[0] or f"https://doi.org/{doi}"
+            parts = urlsplit(target)
+            if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
+                raise ValueError("Browser assist requires an HTTPS URL without embedded credentials")
+            result = asyncio.run(browser_use_open_url(target, settings.browser_profile, headless=args.headless, wait_for_console=not args.no_wait))
+        except Exception as exc:
+            payload = {"schema": 1, "ok": False, "command": "browser-assist", "status": "assist_failed", "error": type(exc).__name__}
+            _emit(args, payload, payload["error"], error=True)
+            return EXIT_RUNTIME_ERROR
+        payload = {"schema": 1, "ok": True, "command": "browser-assist", "target": safe_browser_url(target), **result}
+        payload["status"] = result.get("status", "complete")
+        human = f"Browser-assist {payload['status']}: {result['after']['current_url']}"
+        _emit(args, payload, human)
+        return EXIT_OK
     if args.command == "manual-review":
         log_path = args.log or settings.browser_profile / "batch_log.jsonl"
         count = write_manual_review(log_path, args.output, settings.resolver_template)
@@ -213,10 +243,12 @@ def main(argv: list[str] | None = None) -> int:
             "issues": issues,
             "setup_command": "doi2pdf-web",
             "web_setup_complete": not settings.needs_setup(),
+            "network_mode": settings.normalized_network_mode(),
+            "effective_network_mode": settings.effective_network_mode(),
             "routes": {
                 "open_access": bool(settings.unpaywall_email),
                 "publisher_tdm": bool(settings.elsevier_api_key or settings.wiley_tdm_token or settings.springer_api_key),
-                "institution": bool(settings.openathens_redirector_prefix or settings.ezproxy_prefix or settings.ezproxy_suffix),
+                "institution": settings.allow_institutional_fallback(),
                 "resolver": bool(settings.resolver_template),
                 "publisher_route_count": len(ROUTES),
                 "holdings": bool(settings.holdings_db and settings.holdings_db.is_file()),
@@ -229,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             app.institution.login()
         except Exception as exc:
-            payload = {"schema": 1, "ok": False, "command": "login", "status": "login_required", "error": f"{type(exc).__name__}: {exc}"}
+            payload = {"schema": 1, "ok": False, "command": "login", "status": "login_required", "error": type(exc).__name__}
             _emit(args, payload, payload["error"], error=True)
             return EXIT_LOGIN_REQUIRED
         _emit(args, {"schema": 1, "ok": True, "command": "login", "status": "session_ready"}, "Institutional session ready.")
@@ -276,39 +308,118 @@ def main(argv: list[str] | None = None) -> int:
             payload = {"schema": 1, "ok": False, "command": "batch-zotero", "status": "zotero_database_missing", "error": "Zotero database not found; pass --db PATH"}
             _emit(args, payload, payload["error"], error=True)
             return EXIT_INPUT_OR_CONFIG
-        outcomes = []
         log_path = args.log or settings.browser_profile / "batch_log.jsonl"
+        allow_institution = settings.allow_institutional_fallback() and not args.no_institution
         already_tried = attempted_keys(log_path, retry_failed=args.retry_failed) if args.resume else set()
         items = ZoteroLibrary(db).missing_pdfs(args.limit)
-        # OpenAlex is the only OA index with a free multi-DOI batch endpoint;
-        # warming its cache for the whole batch up front turns N per-DOI
-        # requests into a handful of chunked ones. Unpaywall and the other
-        # sources still query one DOI at a time inside app.fetch().
-        pending_dois = [item["doi"] for item in items if item["doi"] and item["key"] not in already_tried]
-        app.oa.prefetch_openalex_batch(pending_dois)
-        skipped = 0
-        for item in items:
-            if item["key"] in already_tried:
-                skipped += 1
+        grouped_items = group_batch_items([item for item in items if item.get("key") not in already_tried])
+
+        def run_group(group_name: str, group_items: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+            group_app = DOI2PDF(settings)
+            group_dois = [item["doi"] for item in group_items if item["doi"]]
+            if group_dois:
+                group_app.oa.prefetch_openalex_batch(group_dois)
+            local_results: list[dict[str, Any]] = []
+            for item in group_items:
+                if item["key"] in already_tried:
+                    continue
+                target = build_pdf_path(
+                    args.output_dir,
+                    zotero_key=item["key"],
+                    author=item["author"],
+                    year=item["year"],
+                    title=item["title"],
+                    doi=item["doi"],
+                )
+                try:
+                    result = group_app.fetch(item["doi"] or item["title"] or "", target, use_institution=False)
+                    local_results.append({
+                        "item_key": item["key"],
+                        "title": item["title"],
+                        "doi": result.doi,
+                        "group": group_name,
+                        "target": target,
+                        "result": result,
+                    })
+                except Exception as exc:
+                    local_results.append({
+                        "item_key": item["key"],
+                        "title": item["title"],
+                        "doi": item["doi"],
+                        "group": group_name,
+                        "target": target,
+                        "result": {"schema": 1, "ok": False, "doi": item["doi"], "path": None, "error": f"{type(exc).__name__}: {exc}"},
+                    })
+                time.sleep(1)
+            return group_name, local_results
+
+        with ThreadPoolExecutor(max_workers=min(4, max(1, len(grouped_items)))) as executor:
+            futures = [executor.submit(run_group, group_name, group) for group_name, group in sorted(grouped_items.items())]
+            phase1 = []
+            for future in futures:
+                phase1.extend(future.result()[1])
+
+        outcomes: list[dict[str, Any]] = []
+        skipped = sum(1 for item in items if item["key"] in already_tried)
+        pending_institution: list[dict[str, Any]] = []
+        for row in phase1:
+            result = row["result"]
+            if isinstance(result, dict):
+                outcomes.append(result)
+                append_batch_log(log_path, {
+                    "item_key": row["item_key"],
+                    "doi": row["doi"],
+                    "title": row["title"],
+                    "group": row["group"],
+                    "status": "error",
+                    "error_type": result.get("error", "fetch_failed"),
+                })
                 continue
-            target = build_pdf_path(
-                args.output_dir, zotero_key=item["key"], author=item["author"],
-                year=item["year"], title=item["title"], doi=item["doi"],
-            )
-            try:
-                result = app.fetch(item["doi"] or item["title"] or "", target, not args.no_institution)
+            if result.ok or not allow_institution:
                 outcomes.append(result.to_dict())
-                append_batch_log(log_path, {"item_key": item["key"], "doi": result.doi, "title": item["title"], "status": "success" if result.ok else "no_pdf", "route": result.route, "path": result.path})
-            except Exception as exc:
-                outcomes.append({"schema": 1, "ok": False, "doi": item["doi"], "path": None,
-                                 "item_key": item["key"], "error": f"{type(exc).__name__}: {exc}"})
-                append_batch_log(log_path, {"item_key": item["key"], "doi": item["doi"], "title": item["title"], "status": "error", "error_type": type(exc).__name__})
-            # Public APIs also deserve a light courtesy pause; the institutional path
-            # applies its stronger persistent limiter independently.
-            time.sleep(1)
+                append_batch_log(log_path, {
+                    "item_key": row["item_key"],
+                    "doi": result.doi,
+                    "title": row["title"],
+                    "group": row["group"],
+                    "status": "success" if result.ok else "no_pdf",
+                    "route": result.route,
+                    "path": result.path,
+                })
+            else:
+                pending_institution.append(row)
+
+        if allow_institution and pending_institution:
+            for row in pending_institution:
+                target = row["target"]
+                try:
+                    result = app.fetch(row["doi"] or row["title"] or "", target, use_institution=True)
+                    outcomes.append(result.to_dict())
+                    append_batch_log(log_path, {
+                        "item_key": row["item_key"],
+                        "doi": result.doi,
+                        "title": row["title"],
+                        "group": row["group"],
+                        "status": "success" if result.ok else "no_pdf",
+                        "route": result.route,
+                        "path": result.path,
+                    })
+                except Exception as exc:
+                    outcomes.append({"schema": 1, "ok": False, "doi": row["doi"], "path": None,
+                                     "item_key": row["item_key"], "error": f"{type(exc).__name__}: {exc}"})
+                    append_batch_log(log_path, {
+                        "item_key": row["item_key"],
+                        "doi": row["doi"],
+                        "title": row["title"],
+                        "group": row["group"],
+                        "status": "error",
+                        "error_type": type(exc).__name__,
+                    })
+                time.sleep(1)
+
         succeeded = sum(bool(row.get("ok")) for row in outcomes)
         failed = sum(not bool(row.get("ok")) for row in outcomes)
-        summary = {"ok": failed == 0, "succeeded": succeeded, "failed": failed, "skipped": skipped, "log": str(log_path.resolve()), "results": outcomes}
+        summary = {"ok": failed == 0, "succeeded": succeeded, "failed": failed, "skipped": skipped, "groups": len(grouped_items), "log": str(log_path.resolve()), "results": outcomes}
         summary.update({"schema": 1, "command": "batch-zotero", "status": "complete" if not summary["failed"] else "partial_failure"})
         _emit(args, summary, f"Zotero batch complete: {summary['succeeded']} succeeded, {summary['failed']} failed", error=bool(summary["failed"]))
         return EXIT_OK if not summary["failed"] else EXIT_NO_PDF
@@ -322,7 +433,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = app.fetch(doi, provisional, use_institution=not args.no_institution)
     except Exception as exc:
-        payload = {"schema": 1, "ok": False, "command": "fetch", "status": "runtime_error", "doi": doi, "error": f"{type(exc).__name__}: {exc}"}
+        payload = {"schema": 1, "ok": False, "command": "fetch", "status": "runtime_error", "doi": doi, "error": type(exc).__name__}
         _emit(args, payload, payload["error"], error=True)
         return EXIT_RUNTIME_ERROR
     if result.ok and not args.output:

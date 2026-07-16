@@ -5,6 +5,7 @@ from doi2pdf.publisher_routes import (
     lww_signed_pdf_url,
     ovid_viewer_pdf_url,
     rewrite_for_proxy,
+    route_group_for,
     route_for,
     template_url,
 )
@@ -16,6 +17,8 @@ def test_complete_original_route_registry_is_present():
     assert route_for("10.1136/bmj.1").headful is True
     assert route_for("10.1097/ABC.1").kind == "lww"
     assert template_url(route_for("10.1111/test"), "10.1111/test") == "https://onlinelibrary.wiley.com/doi/pdfdirect/10.1111/test?download=true"
+    assert route_group_for("10.1056/NEJMoa1") == "nejm"
+    assert route_group_for("10.1016/j.test") == "10.1016"
 
 
 def test_proxy_rewrite_and_meta_extraction():

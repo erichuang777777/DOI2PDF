@@ -1,5 +1,6 @@
 include DOI2PDF.bat
 include .env.example
+include CHANGELOG.md
 include SECURITY.md
 include THIRD_PARTY_NOTICES.md
 recursive-include docs *.md

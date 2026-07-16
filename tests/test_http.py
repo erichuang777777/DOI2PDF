@@ -2,7 +2,7 @@ import http.server
 import socketserver
 import threading
 
-from doi2pdf.http import PDF_MAGIC, HttpClient
+from doi2pdf.http import PDF_MAGIC, HttpClient, looks_like_challenge_text
 
 
 PDF_BYTES = PDF_MAGIC + b" test\n" + b"0" * 2048
@@ -56,6 +56,24 @@ def test_fetch_pdf_does_not_retry_client_errors():
         assert len(calls) == 1
     finally:
         server.shutdown()
+
+
+def test_fetch_pdf_reports_challenge_pages_explicitly():
+    server, calls = _serve([(200, b"Performing security verification")])
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/paper.pdf"
+        client = HttpClient("test@example.org", timeout=5, max_retries=0, block_private_hosts=False)
+        content, status = client.fetch_pdf(url)
+        assert content is None
+        assert status == "cf_challenge"
+        assert len(calls) == 1
+    finally:
+        server.shutdown()
+
+
+def test_normal_cloudflare_asset_reference_is_not_a_challenge():
+    assert not looks_like_challenge_text('<script src="https://static.cloudflareinsights.com/beacon.js"></script>')
+    assert looks_like_challenge_text('<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>')
 
 
 def test_fetch_pdf_gives_up_after_max_retries_exhausted():

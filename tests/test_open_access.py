@@ -107,6 +107,49 @@ def test_pmc_direct_uses_ncbi_front_end():
     assert candidate.source == "pmc_direct"
 
 
+def test_pmc_cloud_uses_version_metadata_and_only_returns_reusable_pdf():
+    class CloudHttp(FakeHttp):
+        def get_json(self, url, **kwargs):
+            if "idconv" in url:
+                return {"records": [{"pmcid": "PMC456"}]}
+            assert url.endswith("/PMC456.2/PMC456.2.json")
+            return {
+                "doi": "10.1/example",
+                "is_pmc_openaccess": True,
+                "is_manuscript": False,
+                "license_code": "CC BY",
+                "pdf_url": "s3://pmc-oa-opendata/PMC456.2/PMC456.2.pdf?md5=abc",
+            }
+
+        def get_content(self, url, **kwargs):
+            assert url == "https://pmc-oa-opendata.s3.amazonaws.com/"
+            assert kwargs["params"]["prefix"] == "PMC456."
+            return b'''<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+              <CommonPrefixes><Prefix>PMC456.2/</Prefix></CommonPrefixes>
+            </ListBucketResult>'''
+
+    candidates = OpenAccessResolver(Settings(), CloudHttp()).pmc_cloud("10.1/example")
+    assert len(candidates) == 1
+    assert candidates[0].url == "https://pmc-oa-opendata.s3.amazonaws.com/PMC456.2/PMC456.2.pdf?md5=abc"
+    assert candidates[0].source == "pmc_cloud"
+
+
+def test_pmc_cloud_rejects_non_reusable_or_missing_pdf_metadata():
+    class CloudHttp(FakeHttp):
+        def get_json(self, url, **kwargs):
+            if "idconv" in url:
+                return {"records": [{"pmcid": "PMC456"}]}
+            return {"doi": "10.1/example", "is_pmc_openaccess": False, "is_manuscript": False,
+                    "pdf_url": "s3://pmc-oa-opendata/PMC456.1/PMC456.1.pdf"}
+
+        def get_content(self, url, **kwargs):
+            return b'''<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+              <CommonPrefixes><Prefix>PMC456.1/</Prefix></CommonPrefixes>
+            </ListBucketResult>'''
+
+    assert OpenAccessResolver(Settings(), CloudHttp()).pmc_cloud("10.1/example") == []
+
+
 def test_europe_pmc_and_pmc_direct_share_a_single_idconv_call():
     class CountingHttp(FakeHttp):
         def __init__(self):
@@ -192,7 +235,7 @@ def test_candidates_preserve_priority_order_regardless_of_completion_order():
 
     resolver = OpenAccessResolver(Settings(), FakeHttp())
     # Silence every source except the two under test.
-    for name in ("openalex", "crossref_links", "europe_pmc", "europe_pmc_search",
+    for name in ("openalex", "crossref_links", "pmc_cloud", "europe_pmc", "europe_pmc_search",
                  "pmc_direct", "arxiv", "core", "doaj", "paper_radar"):
         setattr(resolver, name, lambda doi: [])
 
@@ -234,7 +277,7 @@ def test_prefetch_openalex_batch_uses_the_filter_endpoint_and_warms_the_cache():
 
     assert len(http.calls) == 1
     assert http.calls[0][0] == "https://api.openalex.org/works"
-    assert http.calls[0][1]["filter"] == "doi:10.1%2Fa|10.1%2Fb"
+    assert http.calls[0][1]["filter"] == "doi:10.1/a|10.1/b"
 
     # 10.1/a was in the batch response: cached with its candidate, no re-query.
     candidates = resolver.openalex("10.1/a")

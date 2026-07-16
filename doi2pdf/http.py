@@ -11,12 +11,39 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from ._version import __version__
+
 
 PDF_MAGIC = b"%PDF-"
+CHALLENGE_MARKERS = (
+    "just a moment",
+    "performing security verification",
+    "verify you are human",
+    "validating you are human",
+    "驗證您是人類",
+    "正在執行安全驗證",
+    "attention required! | cloudflare",
+    "cdn-cgi/challenge-platform",
+    "challenges.cloudflare.com",
+    "cf-chl-",
+    "cf-turnstile",
+    "g-recaptcha",
+    "recaptcha/challengepage",
+)
 
 
 def looks_like_pdf(content: bytes) -> bool:
     return len(content) >= 1024 and content[:1024].lstrip().startswith(PDF_MAGIC)
+
+
+def looks_like_challenge(content: bytes) -> bool:
+    sample = content[:8192].decode("utf-8", errors="ignore").lower()
+    return looks_like_challenge_text(sample)
+
+
+def looks_like_challenge_text(text: str) -> bool:
+    low = text.lower()
+    return any(marker in low for marker in CHALLENGE_MARKERS)
 
 
 def _is_public_ip(ip: str) -> bool:
@@ -91,7 +118,7 @@ class HttpClient:
         # and fall through to the next one, needlessly lowering the success rate.
         self.session = build_retry_session(max_retries, block_private_hosts, session=session)
         suffix = f" (mailto:{contact})" if contact else ""
-        self.session.headers.update({"User-Agent": f"DOI2PDF/0.1{suffix}"})
+        self.session.headers.update({"User-Agent": f"DOI2PDF/{__version__}{suffix}"})
 
     def get_json(self, url: str, **kwargs):
         response = self.session.get(url, timeout=self.timeout, **kwargs)
@@ -113,6 +140,8 @@ class HttpClient:
             return None, f"request_error:{exc.__class__.__name__}"
         if response.status_code != 200:
             return None, f"http_{response.status_code}"
+        if looks_like_challenge(response.content):
+            return None, "cf_challenge"
         if not looks_like_pdf(response.content):
             return None, "not_pdf"
         return response.content, "pdf"
@@ -124,6 +153,8 @@ class HttpClient:
             return None, f"request_error:{exc.__class__.__name__}"
         if response.status_code != 200:
             return None, f"http_{response.status_code}"
+        if looks_like_challenge(response.content):
+            return None, "cf_challenge"
         if looks_like_pdf(response.content):
             return response.url, "pdf"
         try:
