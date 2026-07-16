@@ -47,7 +47,7 @@ dev = [
     "pyyaml>=6.0",
     "ruff>=0.6.0",
     "twine>=5.0",
-    "pip-audit>=2.10.0",
+    "pip-audit>=2.10.1",
 ]
 
 [project.scripts]
