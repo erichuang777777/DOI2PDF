@@ -11,6 +11,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from ._version import __version__
+
 
 PDF_MAGIC = b"%PDF-"
 CHALLENGE_MARKERS = (
@@ -20,8 +22,13 @@ CHALLENGE_MARKERS = (
     "validating you are human",
     "驗證您是人類",
     "正在執行安全驗證",
-    "cloudflare",
-    "recaptcha",
+    "attention required! | cloudflare",
+    "cdn-cgi/challenge-platform",
+    "challenges.cloudflare.com",
+    "cf-chl-",
+    "cf-turnstile",
+    "g-recaptcha",
+    "recaptcha/challengepage",
 )
 
 
@@ -31,7 +38,12 @@ def looks_like_pdf(content: bytes) -> bool:
 
 def looks_like_challenge(content: bytes) -> bool:
     sample = content[:8192].decode("utf-8", errors="ignore").lower()
-    return any(marker in sample for marker in CHALLENGE_MARKERS)
+    return looks_like_challenge_text(sample)
+
+
+def looks_like_challenge_text(text: str) -> bool:
+    low = text.lower()
+    return any(marker in low for marker in CHALLENGE_MARKERS)
 
 
 def _is_public_ip(ip: str) -> bool:
@@ -106,7 +118,7 @@ class HttpClient:
         # and fall through to the next one, needlessly lowering the success rate.
         self.session = build_retry_session(max_retries, block_private_hosts, session=session)
         suffix = f" (mailto:{contact})" if contact else ""
-        self.session.headers.update({"User-Agent": f"DOI2PDF/0.1{suffix}"})
+        self.session.headers.update({"User-Agent": f"DOI2PDF/{__version__}{suffix}"})
 
     def get_json(self, url: str, **kwargs):
         response = self.session.get(url, timeout=self.timeout, **kwargs)

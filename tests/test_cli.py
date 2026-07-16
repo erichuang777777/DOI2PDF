@@ -194,7 +194,7 @@ def test_batch_zotero_skips_prefetch_for_already_tried_items(tmp_path, monkeypat
     assert prefetch_calls == [["10.1/two"]]
 
 
-def test_batch_zotero_off_campus_skips_institution_phase(tmp_path, monkeypatch):
+def test_batch_zotero_off_campus_skips_institution_phase(tmp_path, monkeypatch, capsys):
     from doi2pdf.models import FetchResult
 
     db = tmp_path / "zotero.sqlite"
@@ -232,12 +232,15 @@ def test_batch_zotero_off_campus_skips_institution_phase(tmp_path, monkeypatch):
         lambda: Settings(contact_email="agent@example.org", unpaywall_email="agent@example.org", network_mode="off_campus"),
     )
 
-    cli.main([
+    assert cli.main([
         "--json", "batch-zotero", "--db", str(db),
         "--output-dir", str(tmp_path / "out"), "--log", str(tmp_path / "log.jsonl"),
-    ])
+    ]) == cli.EXIT_NO_PDF
 
     assert fetch_calls == [False]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["failed"] == 1
+    assert payload["results"][0]["ok"] is False
 
 
 def test_skill_installer_dry_run_uses_local_project():
@@ -252,3 +255,15 @@ def test_skill_installer_dry_run_uses_local_project():
     assert payload["dry_run"] is True
     assert payload["commands"][0][-1].endswith("[web]")
     assert Path(payload["target"]).name == Path.cwd().name
+
+
+def test_skill_installer_browser_mode_includes_browser_use():
+    script = Path("skills/doi2pdf/scripts/install_cli.py")
+    completed = subprocess.run(
+        [sys.executable, str(script), "--with-browser", "--dry-run", "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["commands"][0][-1].endswith("[web,browser,browser_use]")

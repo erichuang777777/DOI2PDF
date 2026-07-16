@@ -13,13 +13,15 @@ out of prompts, command arguments, logs, and responses.
 
 1. Run `doi2pdf doctor --json`. If the command is unavailable, run
    `python scripts/install_cli.py` relative to this skill directory. Add `--with-browser` only
-   when institutional login is required and the user permits installing Chromium.
+   when institutional login is required and the user permits installing browser-use and Chromium.
 2. If doctor returns `setup_required`, launch `doi2pdf-web` and direct the user to the local
    HTML console. Use **Settings** for configuration, **Activity** for sanitized live logs, and
    the job progress page for route-by-route monitoring. Never ask the user to paste an API key
    or password into chat.
    Set `DOI2PDF_NETWORK_MODE` to `off_campus` when only OA/OpenAthens/API routes should run,
    or `campus` when institutional fallback and browser-assisted discovery are allowed.
+   For `auto`, configure the institution's documented networks in `DOI2PDF_CAMPUS_CIDRS`;
+   do not infer campus access merely because an EZproxy setting exists.
    Use **Library Access Assistant** when the user has a library-provided link but does not know
    its OpenAthens/EZproxy prefix. Review the inferred setting before applying it; never guess an
    institution from the user's email or use another library's endpoint.
@@ -32,8 +34,8 @@ out of prompts, command arguments, logs, and responses.
 5. Prefer `doi2pdf fetch <DOI> --no-institution --json` first. Parse the JSON
    envelope; do not scrape human logs.
 6. If OA/TDM routes fail and the user has legitimate subscription access, check that their
-   own OpenAthens or EZproxy prefix is configured and the network mode allows institutional
-   fallback. Run `doi2pdf login --json` when an
+   own access route is configured and the network mode allows it. Off-campus mode permits only
+   OpenAthens; campus mode permits direct publisher access and EZproxy. Run `doi2pdf login --json` when an
    interactive SSO/MFA session is needed, then retry without `--no-institution`.
    Run `doi2pdf holdings <DOI> --json` when a holdings DB is configured, and do not confuse
    missing coverage with a broken publisher route. Read
@@ -49,7 +51,8 @@ out of prompts, command arguments, logs, and responses.
 8. If all automatic routes fail, return `resolver_url` for manual completion. Do not add an
    unauthorized fallback.
 9. Report the winning `layer`, `route`, output path, byte count, hash, and relevant failed
-   route statuses. Never expose keys, cookies, headers, or credentials.
+   route statuses. For PMC, prefer the current anonymous `pmc_cloud` PDF route; do not revive
+   the retired legacy FTP/package paths. Never expose keys, cookies, headers, or credentials.
 
 For nontechnical local use, launch `DOI2PDF.bat`. Complete `/setup` on first run, retrieve
 from the Fetch page, follow the live progress tracker, then use the tokenized **Open PDF** or
@@ -66,6 +69,8 @@ CLI succeeds but the website appears not to provide a file, verify the result pa
   `--author`, and `--year` when those values are known; otherwise accept translator metadata
   and collision suffixes.
 - Treat translator attachment URLs as candidates, never proof: require `%PDF-` validation.
+- Use direct translator attachment candidates only in campus mode. Off-campus subscription
+  retrieval must go through the configured OpenAthens browser session.
 
 ## Institutional safety
 
@@ -127,8 +132,9 @@ human login required, and `5` as an unexpected runtime failure. Always inspect `
 
 When validating institutional behavior that the agent cannot access itself, use
 `doi2pdf acceptance --json` or the console's **Acceptance** page. The corpus contains real,
-dated failures from several publishers and offers only one-at-a-time retrieval. Do not turn
-it into a bulk downloader. Keep OA discovery-gap cases distinct from subscription controls.
+dated controls from several publishers and offers only one-at-a-time retrieval. Do not turn
+it into a bulk downloader. Keep confirmed OA successes, PMC records without a reusable PDF,
+and subscription controls distinct.
 
 Read [references/configuration.md](references/configuration.md) when configuring API keys,
 LLM ranking, Zotero translation-server, OpenAthens, EZproxy, or resolver templates.

@@ -2,7 +2,7 @@ import http.server
 import socketserver
 import threading
 
-from doi2pdf.http import PDF_MAGIC, HttpClient
+from doi2pdf.http import PDF_MAGIC, HttpClient, looks_like_challenge_text
 
 
 PDF_BYTES = PDF_MAGIC + b" test\n" + b"0" * 2048
@@ -69,6 +69,11 @@ def test_fetch_pdf_reports_challenge_pages_explicitly():
         assert len(calls) == 1
     finally:
         server.shutdown()
+
+
+def test_normal_cloudflare_asset_reference_is_not_a_challenge():
+    assert not looks_like_challenge_text('<script src="https://static.cloudflareinsights.com/beacon.js"></script>')
+    assert looks_like_challenge_text('<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>')
 
 
 def test_fetch_pdf_gives_up_after_max_retries_exhausted():

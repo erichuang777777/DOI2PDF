@@ -64,7 +64,7 @@ def write_manual_review(path: Path, output: Path, resolver_template: str = "") -
     table = []
     for row in failures:
         doi = str(row.get("doi") or "")
-        resolver = resolver_template.format(doi=quote(doi, safe="")) if resolver_template and doi else ""
+        resolver = resolver_template.replace("{doi}", quote(doi, safe="")) if resolver_template and doi else ""
         links = f'<a href="https://doi.org/{html.escape(quote(doi, safe="/"), quote=True)}">DOI</a>' if doi else ""
         if resolver:
             links += f' · <a href="{html.escape(resolver, quote=True)}">Library resolver</a>'

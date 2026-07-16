@@ -14,12 +14,13 @@ random server-side file tokens. Monitoring failure is isolated from retrieval ex
 then walks four ordered layers and stops only when a response passes PDF magic-byte
 validation.
 
-1. Open access: Unpaywall locations, Semantic Scholar, OpenAlex OA locations, Europe PMC,
-   and repository landing-page metadata.
+1. Open access: Unpaywall locations, Semantic Scholar, OpenAlex OA locations, Crossref links,
+   the 2026 versioned PMC AWS dataset, Europe PMC, and repository landing-page metadata.
 2. Publisher TDM: Elsevier, Wiley, and Springer Nature official endpoints using the user's
    own optional API credentials.
-3. Institutional: Zotero translator attachment discovery followed by a serialized,
-   persistent OpenAthens/EZproxy Playwright session.
+3. Institutional: campus-only Zotero publisher-attachment discovery followed by a serialized,
+   persistent OpenAthens/EZproxy/direct-campus Playwright session. Translator metadata lookup
+   remains available in every mode, but its direct publisher attachment requests do not.
 4. Resolver: an SFX/OpenURL link for manual completion.
 
 All output is written to a temporary file and atomically renamed. Results contain route,
@@ -28,6 +29,11 @@ layer, attempt statuses, byte count, SHA-256, and the manual resolver when appli
 The browser profile has a cross-process lock, a hard minimum 15-second courtesy interval,
 and a maximum of 100 institutional attempts per local day. Its access log contains only
 timestamps, request kind, and DOI—not credentials or cookies.
+
+Network mode is a policy gate, not a guess based on configured library settings. Explicit
+`off_campus` permits OA/TDM plus the user's OpenAthens redirector only. Explicit `campus`
+permits direct publisher access or EZproxy. `auto` becomes campus only when a local interface
+address matches a user-configured institutional CIDR; it uses no external IP lookup.
 
 Institutional dispatch uses the complete paper-fetch prefix registry. `tpl` routes construct
 authorized publisher PDF URLs; `meta` routes resolve the article and follow

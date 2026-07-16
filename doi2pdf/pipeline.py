@@ -8,7 +8,6 @@ from .config import Settings
 from .http import HttpClient, atomic_write_pdf, build_retry_session
 from .institution import InstitutionalBrowser, ProfileBusy
 from .models import Attempt, Candidate, FetchResult
-from .normalize import normalize_doi
 from .open_access import OpenAccessResolver
 from .resolver import IdentifierResolver
 from .tdm import TDMResolver
@@ -48,6 +47,8 @@ class DOI2PDF:
         self._emit(progress, 5, "resolving", "Resolving the paper identifier")
         doi = self.identifiers.resolve(identifier)
         result = FetchResult(doi=doi, resolver_url=self.settings.resolver_url(doi))
+        allow_institution = use_institution and self.settings.allow_institutional_fallback()
+        allow_direct_translator_attachments = allow_institution and self.settings.effective_network_mode() == "campus"
         self._emit(progress, 10, "resolved", "Identifier resolved", source="doi")
 
         self._emit(progress, 15, "open_access", "Querying open-access indexes")
@@ -63,7 +64,7 @@ class DOI2PDF:
                 metadata_items = self.translator.search(doi)
                 result.metadata["zotero"] = metadata_items[0] if metadata_items else {}
             except Exception as exc:
-                result.attempts.append(Attempt("zotero_translator", "open_access", None, "unavailable", str(exc)))
+                result.attempts.append(Attempt("zotero_translator", "open_access", None, "unavailable", type(exc).__name__))
                 self._emit(progress, 25, "metadata", "Translator metadata unavailable", source="zotero_translator", status="unavailable")
 
         if self._try_candidates(candidates, output, result, progress, 30, 48):
@@ -81,7 +82,7 @@ class DOI2PDF:
                 return self._finish(result, started)
 
         # Translators are strongest on the resolved publisher page, after OA/TDM APIs.
-        if self.settings.translator_enabled:
+        if self.settings.translator_enabled and allow_direct_translator_attachments:
             self._emit(progress, 68, "translator", "Checking publisher-page translator attachments")
             try:
                 web_items = self.translator.web(f"https://doi.org/{doi}")
@@ -92,10 +93,10 @@ class DOI2PDF:
                     self._emit(progress, 100, "complete", "Verified translator PDF saved", source=result.route, status="pdf_saved")
                     return self._finish(result, started)
             except Exception as exc:
-                result.attempts.append(Attempt("zotero_translator_web", "open_access", None, "unavailable", str(exc)))
+                result.attempts.append(Attempt("zotero_translator_web", "institution", None, "unavailable", type(exc).__name__))
                 self._emit(progress, 78, "translator", "Publisher translator unavailable", source="zotero_translator_web", status="unavailable")
 
-        if use_institution and self.settings.allow_institutional_fallback():
+        if allow_institution:
             self._emit(progress, 82, "institution", "Checking the authorized institutional session")
             try:
                 institution = self.institution.fetch(doi)
@@ -106,11 +107,11 @@ class DOI2PDF:
                     self._success(result, output, institution.content, institution.route, "institution")
                     self._emit(progress, 100, "complete", "Verified institutional PDF saved", source=institution.route, status="pdf_saved")
                     return self._finish(result, started)
-            except ProfileBusy as exc:
-                result.attempts.append(Attempt("institution", "institution", None, "busy", str(exc)))
+            except ProfileBusy:
+                result.attempts.append(Attempt("institution", "institution", None, "busy", "profile_busy"))
                 self._emit(progress, 92, "institution", "Institutional browser is busy", source="institution", status="busy")
             except Exception as exc:
-                result.attempts.append(Attempt("institution", "institution", None, "failed", str(exc)))
+                result.attempts.append(Attempt("institution", "institution", None, "failed", type(exc).__name__))
                 self._emit(progress, 92, "institution", "Institutional route failed", source="institution", status="failed")
 
         result.attempts.append(Attempt("library_resolver", "resolver", result.resolver_url, "manual_required"))

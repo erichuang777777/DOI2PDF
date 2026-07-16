@@ -4,6 +4,7 @@ from urllib.parse import quote
 
 import requests
 
+from ._version import __version__
 from .config import Settings
 from .http import looks_like_pdf
 
@@ -16,7 +17,7 @@ class TDMResolver:
         # top-level get() has the same signature as Session.get().
         self.session = session or requests
         contact = f" (mailto:{settings.contact_email})" if settings.contact_email else ""
-        self.user_agent = f"DOI2PDF/0.1{contact}"
+        self.user_agent = f"DOI2PDF/{__version__}{contact}"
 
     def _get(self, url: str, headers: dict[str, str]) -> tuple[bytes | None, str]:
         try:

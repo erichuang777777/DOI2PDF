@@ -19,7 +19,6 @@ class FakeHttp:
     def landing_pdf_url(self, url):
         return None, "no_citation_pdf_url"
 
-
 def test_pipeline_stops_at_verified_oa_candidate(tmp_path: Path):
     app = DOI2PDF(Settings(translator_enabled=False), http=FakeHttp())
     app.oa.candidates = lambda doi: ([
@@ -73,6 +72,24 @@ def test_manual_resolver_completes_progress(tmp_path: Path):
     assert events[-1]["status"] == "manual_required"
 
 
+def test_off_campus_skips_direct_translator_attachments(tmp_path: Path):
+    settings = Settings(
+        translator_enabled=True,
+        network_mode="off_campus",
+        openathens_redirector_prefix="https://go.openathens.net/redirector/example?url=",
+    )
+    app = DOI2PDF(settings, http=FakeHttp())
+    app.oa.candidates = lambda doi: ([], [])
+    app.tdm.routes = lambda doi: (_ for _ in ())
+    app.translator.search = lambda doi: []
+    web_calls = []
+    app.translator.web = lambda url: web_calls.append(url) or []
+    app.institution.fetch = lambda doi: InstitutionResult(None, "openathens:test", "no_pdf")
+    result = app.fetch("10.1234/example", tmp_path / "paper.pdf", use_institution=True)
+    assert not result.ok
+    assert web_calls == []
+
+
 def test_institution_route_and_entitlement_are_preserved(tmp_path: Path):
     app = DOI2PDF(Settings(translator_enabled=False, network_mode="campus", openathens_redirector_prefix="https://go.openathens.net/redirector/example?url="), http=FakeHttp())
     app.oa.candidates = lambda doi: ([], [])
@@ -97,6 +114,20 @@ def test_off_campus_mode_skips_institution_even_when_requested(tmp_path: Path):
     result = app.fetch("10.1056/NEJMoa1", tmp_path / "paper.pdf", use_institution=True)
     assert not result.ok
     assert called["value"] is False
+
+
+def test_off_campus_mode_uses_configured_openathens(tmp_path: Path):
+    settings = Settings(
+        translator_enabled=False,
+        network_mode="off_campus",
+        openathens_redirector_prefix="https://go.openathens.net/redirector/example?url=",
+    )
+    app = DOI2PDF(settings, http=FakeHttp())
+    app.oa.candidates = lambda doi: ([], [])
+    app.tdm.routes = lambda doi: (_ for _ in ())
+    app.institution.fetch = lambda doi: InstitutionResult(PDF, "openathens:nejm:tpl", "pdf")
+    result = app.fetch("10.1056/NEJMoa1", tmp_path / "paper.pdf")
+    assert result.ok and result.route.startswith("openathens:")
 
 
 def test_tdm_shares_the_http_client_session():

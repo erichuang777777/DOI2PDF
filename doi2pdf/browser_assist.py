@@ -4,22 +4,21 @@ import asyncio
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+from .http import looks_like_challenge_text
 
 
-CHALLENGE_MARKERS = (
-    "just a moment",
-    "performing security verification",
-    "verify you are human",
-    "validating you are human",
-    "驗證您是人類",
-    "正在執行安全驗證",
-    "cloudflare",
-)
-
-
-def _looks_like_challenge(text: str) -> bool:
-    low = text.lower()
-    return any(marker in low for marker in CHALLENGE_MARKERS)
+def _safe_url(value: str) -> str:
+    """Return only scheme/host/path; never emit credentials or signed queries."""
+    parts = urlsplit(value)
+    host = parts.hostname or ""
+    try:
+        if parts.port:
+            host += f":{parts.port}"
+    except ValueError:
+        pass
+    return urlunsplit((parts.scheme, host, parts.path, "", ""))
 
 
 async def open_url(
@@ -49,13 +48,14 @@ async def open_url(
         profile_directory="Default",
         keep_alive=True,
         accept_downloads=True,
+        captcha_solver=False,
     )
     try:
         await browser.start()
         await browser.navigate_to(url)
         await asyncio.sleep(5)
         before = {
-            "current_url": await browser.get_current_page_url(),
+            "current_url": _safe_url(await browser.get_current_page_url()),
             "title": await browser.get_current_page_title(),
         }
         challenge_seen = False
@@ -67,7 +67,7 @@ async def open_url(
             title = await browser.get_current_page_title()
             current_url = await browser.get_current_page_url()
             final = {"current_url": current_url, "title": title}
-            if not _looks_like_challenge(state) and not _looks_like_challenge(title):
+            if not looks_like_challenge_text(state) and not looks_like_challenge_text(title):
                 break
             challenge_seen = True
             if not wait_for_console:
@@ -84,12 +84,12 @@ async def open_url(
         if wait_for_console:
             await asyncio.sleep(1)
         after = {
-            "current_url": final["current_url"],
+            "current_url": _safe_url(final["current_url"]),
             "title": final["title"],
         }
         return {
             "ok": True,
-            "status": "session_ready" if not challenge_seen or not _looks_like_challenge(after["title"]) else "challenge_still_present",
+            "status": "session_ready" if not challenge_seen or not looks_like_challenge_text(after["title"]) else "challenge_still_present",
             "challenge_seen": challenge_seen,
             "before": before,
             "after": after,

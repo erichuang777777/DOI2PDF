@@ -11,7 +11,7 @@ from urllib.parse import quote, urljoin, urlsplit
 
 from .config import Settings
 from .holdings import Holdings
-from .http import looks_like_pdf
+from .http import looks_like_challenge_text, looks_like_pdf
 from .learned_rules import RuleStore
 from .llm_ranker import rank as llm_rank
 from .publisher_routes import (
@@ -94,16 +94,6 @@ def profile_lock(profile: Path):
 
 class InstitutionalBrowser:
     E3_MARKERS = ("License Service Failure", "Code: E3", "LicenseServiceFailure")
-    CHALLENGE_MARKERS = (
-        "just a moment",
-        "performing security verification",
-        "verify you are human",
-        "validating you are human",
-        "驗證您是人類",
-        "正在執行安全驗證",
-        "cloudflare",
-    )
-
     def __init__(self, settings: Settings):
         self.settings = settings
         self.holdings = Holdings(settings)
@@ -114,22 +104,30 @@ class InstitutionalBrowser:
         return self.settings.browser_profile / "access_log.jsonl"
 
     def _family(self) -> str | None:
-        if self.settings.openathens_redirector_prefix:
-            return "openathens"
+        mode = self.settings.effective_network_mode()
+        if mode == "off_campus":
+            return "openathens" if self.settings.openathens_redirector_prefix else None
         if self.settings.ezproxy_suffix or self.settings.ezproxy_prefix:
             return "ezproxy"
+        if mode == "campus":
+            return "campus"
+        if self.settings.openathens_redirector_prefix:
+            return "openathens"
         return None
 
     def authorize_url(self, target: str, doi: str = "") -> str | None:
-        if self.settings.openathens_redirector_prefix:
+        family = self._family()
+        if family == "openathens":
             return self.settings.openathens_redirector_prefix + quote(target, safe="")
-        if self.settings.ezproxy_suffix:
+        if family == "ezproxy" and self.settings.ezproxy_suffix:
             return rewrite_for_proxy(target, self.settings.ezproxy_suffix)
-        if self.settings.ezproxy_prefix:
+        if family == "ezproxy" and self.settings.ezproxy_prefix:
             prefix = self.settings.ezproxy_prefix
             if "{url}" in prefix or "{doi}" in prefix:
                 return prefix.format(url=quote(target, safe=""), doi=quote(doi, safe=""))
             return prefix + quote(target, safe="")
+        if family == "campus":
+            return target
         return None
 
     def access_url(self, doi: str) -> tuple[str | None, str | None]:
@@ -138,6 +136,8 @@ class InstitutionalBrowser:
     def login(self, wait_for_console: bool = True) -> None:
         url = self.settings.library_login_url
         if not url:
+            if self._family() == "campus":
+                raise ValueError("Campus-direct access does not require a library login URL")
             url, _ = self.access_url("10.5555/doi2pdf-login-check")
         if not url:
             raise ValueError("Configure OPENATHENS_REDIRECTOR_PREFIX, EZPROXY_PREFIX, or EZPROXY_SUFFIX first")
@@ -160,7 +160,7 @@ class InstitutionalBrowser:
     def _route_entry_url(self, doi: str, spec: RouteSpec | None) -> str | None:
         if spec and spec.kind == "tpl":
             return self.authorize_url(template_url(spec, doi), doi)
-        if self.settings.ezproxy_suffix:
+        if self._family() == "ezproxy" and self.settings.ezproxy_suffix:
             if spec and spec.kind == "meta" and spec.host:
                 return f"https://{proxy_host(spec.host, self.settings.ezproxy_suffix)}/lookup/doi/{doi}"
             return f"https://doi-org.{self.settings.ezproxy_suffix.lstrip('.')}/{doi}"
@@ -213,7 +213,7 @@ class InstitutionalBrowser:
         except Exception:
             pass
         low = " ".join(parts).lower()
-        return any(marker in low for marker in cls.CHALLENGE_MARKERS)
+        return looks_like_challenge_text(low)
 
     def _request_pdf(self, context, url: str, referer: str | None = None, retries: int = 1) -> tuple[bytes | None, str]:
         for attempt in range(retries):
@@ -297,9 +297,9 @@ class InstitutionalBrowser:
             host = spec.host
         for rule in (row for row in self.rules.list(host) if row.get("enabled", True)):
             try:
-                content, status = self._try_selector(page, context, captured, rule["selector"])
+                content, _ = self._try_selector(page, context, captured, rule["selector"])
             except Exception:
-                content, status = None, "selector_failed"
+                content = None
             if content:
                 self.rules.remember(host, rule["selector"], text_hint=rule.get("text_hint", ""), source="learned")
                 return content, "pdf_learned_rule"
@@ -326,9 +326,9 @@ class InstitutionalBrowser:
         useful.sort(key=lambda item: (item["id"] != selected_id, -item["score"]))
         for item in useful[:3]:
             try:
-                content, status = self._try_selector(page, context, captured, item["selector"])
+                content, _ = self._try_selector(page, context, captured, item["selector"])
             except Exception:
-                content, status = None, "selector_failed"
+                content = None
             if content:
                 source = "llm" if item["id"] == selected_id else "deterministic"
                 self.rules.remember(host, item["selector"], text_hint=item.get("text", ""), source=source)

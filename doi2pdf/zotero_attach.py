@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import random
 import re
 import shutil
@@ -21,7 +22,8 @@ def zotero_running() -> bool:
     if sys.platform != "win32":
         return False
     try:
-        output = subprocess.check_output(["tasklist", "/FI", "IMAGENAME eq zotero.exe"], text=True)
+        tasklist = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "tasklist.exe"
+        output = subprocess.check_output([str(tasklist), "/FI", "IMAGENAME eq zotero.exe"], text=True)
         return "zotero.exe" in output.lower()
     except (OSError, subprocess.SubprocessError):
         return False

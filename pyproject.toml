@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doi2pdf"
-version = "0.7.0"
+version = "0.8.0"
 description = "Lawful DOI-to-PDF retrieval through OA, publisher TDM, institutional access, and library resolvers"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -23,6 +23,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "requests>=2.31.0",
     "beautifulsoup4>=4.12.0",
+    "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +43,9 @@ dev = [
     "uvicorn>=0.29.0",
     "build>=1.2.0",
     "pytest>=8.0",
+    "pyyaml>=6.0",
+    "ruff>=0.6.0",
+    "twine>=5.0",
 ]
 
 [project.scripts]

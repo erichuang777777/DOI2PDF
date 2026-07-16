@@ -8,12 +8,15 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 from .acceptance import corpus
 from .api_probe import probe_all
 from .batch_journal import append as append_batch_log
 from .batch_journal import attempted_keys, successful_entries as successful_log_entries, write_manual_review
 from .batch_plan import group_items as group_batch_items
+from .browser_assist import _safe_url as safe_browser_url
 from .browser_assist import open_url as browser_use_open_url
 from .config import Settings
 from .holdings import Holdings
@@ -116,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         cases = corpus(args.publisher)
         payload = {
             "schema": 1, "ok": True, "command": "acceptance", "status": "ready",
-            "checked_without_access": "2026-07-15", "count": len(cases), "cases": cases,
+            "checked_without_access": "2026-07-16", "count": len(cases), "cases": cases,
         }
         _emit(args, payload, "\n".join(f"{row['publisher']}: {row['doi']} - {row['title']}" for row in cases))
         return EXIT_OK
@@ -201,12 +204,15 @@ def main(argv: list[str] | None = None) -> int:
             if not target.startswith(("http://", "https://")):
                 doi = app.identifiers.resolve(target)
                 target = app.institution._route_entry_url(doi, route_for(doi)) or app.institution.access_url(doi)[0] or f"https://doi.org/{doi}"
+            parts = urlsplit(target)
+            if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
+                raise ValueError("Browser assist requires an HTTPS URL without embedded credentials")
             result = asyncio.run(browser_use_open_url(target, settings.browser_profile, headless=args.headless, wait_for_console=not args.no_wait))
         except Exception as exc:
-            payload = {"schema": 1, "ok": False, "command": "browser-assist", "status": "assist_failed", "error": f"{type(exc).__name__}: {exc}"}
+            payload = {"schema": 1, "ok": False, "command": "browser-assist", "status": "assist_failed", "error": type(exc).__name__}
             _emit(args, payload, payload["error"], error=True)
             return EXIT_RUNTIME_ERROR
-        payload = {"schema": 1, "ok": True, "command": "browser-assist", "target": target, **result}
+        payload = {"schema": 1, "ok": True, "command": "browser-assist", "target": safe_browser_url(target), **result}
         payload["status"] = result.get("status", "complete")
         human = f"Browser-assist {payload['status']}: {result['after']['current_url']}"
         _emit(args, payload, human)
@@ -242,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
             "routes": {
                 "open_access": bool(settings.unpaywall_email),
                 "publisher_tdm": bool(settings.elsevier_api_key or settings.wiley_tdm_token or settings.springer_api_key),
-                "institution": bool(settings.openathens_redirector_prefix or settings.ezproxy_prefix or settings.ezproxy_suffix) and settings.allow_institutional_fallback(),
+                "institution": settings.allow_institutional_fallback(),
                 "resolver": bool(settings.resolver_template),
                 "publisher_route_count": len(ROUTES),
                 "holdings": bool(settings.holdings_db and settings.holdings_db.is_file()),
@@ -255,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             app.institution.login()
         except Exception as exc:
-            payload = {"schema": 1, "ok": False, "command": "login", "status": "login_required", "error": f"{type(exc).__name__}: {exc}"}
+            payload = {"schema": 1, "ok": False, "command": "login", "status": "login_required", "error": type(exc).__name__}
             _emit(args, payload, payload["error"], error=True)
             return EXIT_LOGIN_REQUIRED
         _emit(args, {"schema": 1, "ok": True, "command": "login", "status": "session_ready"}, "Institutional session ready.")
@@ -369,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
                     "error_type": result.get("error", "fetch_failed"),
                 })
                 continue
-            if result.ok or args.no_institution:
+            if result.ok or not allow_institution:
                 outcomes.append(result.to_dict())
                 append_batch_log(log_path, {
                     "item_key": row["item_key"],
@@ -427,7 +433,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = app.fetch(doi, provisional, use_institution=not args.no_institution)
     except Exception as exc:
-        payload = {"schema": 1, "ok": False, "command": "fetch", "status": "runtime_error", "doi": doi, "error": f"{type(exc).__name__}: {exc}"}
+        payload = {"schema": 1, "ok": False, "command": "fetch", "status": "runtime_error", "doi": doi, "error": type(exc).__name__}
         _emit(args, payload, payload["error"], error=True)
         return EXIT_RUNTIME_ERROR
     if result.ok and not args.output:

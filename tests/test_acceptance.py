@@ -9,13 +9,20 @@ def test_live_corpus_is_small_varied_and_not_a_bulk_fixture():
     assert len({row["publisher"] for row in rows}) >= 5
     assert len({row["doi"] for row in rows}) == len(rows)
     assert all(row["source_url"].startswith("https://") for row in rows)
-    assert all(row["baseline"] in {"not_retrieved_without_access", "timed_out_without_access"} for row in rows)
+    assert all(row["baseline"] in {
+        "not_retrieved_without_access", "timed_out_without_access",
+        "retrieved_via_pmc_cloud", "retrieved_via_unpaywall",
+    } for row in rows)
     assert any(
         row["doi"] == "10.1056/NEJMoa2600157"
         and row["publisher"] == "New England Journal of Medicine"
         and row["source_url"] == "https://www.nejm.org/doi/pdf/10.1056/NEJMoa2600157"
         for row in rows
     )
+    wiley = next(row for row in rows if row["doi"] == "10.1002/hed.27891")
+    assert wiley["baseline"] == "retrieved_via_pmc_cloud"
+    nature = next(row for row in rows if row["doi"] == "10.1038/s44161-024-00596-9")
+    assert nature["access_class"] == "pmc_author_manuscript_no_pdf"
 
 
 def test_unconfigured_api_probe_requires_no_mock_or_network():
