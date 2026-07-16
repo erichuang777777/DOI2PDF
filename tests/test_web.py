@@ -18,6 +18,16 @@ def test_home_has_retrieval_form(monkeypatch):
     assert 'href="/activity"' in page
 
 
+def test_health_distinguishes_setup_state_from_configuration(monkeypatch):
+    monkeypatch.setattr(web, "_settings", lambda: web.Settings(contact_email="doctor@hospital.org", setup_complete=False))
+    payload = json_from_response(web.health())
+    assert payload["ok"] is False
+    assert payload["status"] == "setup_required"
+    assert payload["configuration_ok"] is True
+    assert payload["setup_complete"] is False
+    assert payload["routes"]["open_access"] is True
+
+
 def test_home_discloses_terms_of_service_risk(monkeypatch):
     monkeypatch.setattr(web, "_settings", lambda: web.Settings(contact_email="doctor@hospital.org", setup_complete=True))
     assert "terms of service" in web.home()

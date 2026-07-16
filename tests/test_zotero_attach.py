@@ -3,6 +3,7 @@ import sqlite3
 from pathlib import Path
 
 from doi2pdf.zotero_attach import attach_linked_pdfs, successful_csv_entries
+from tests._pdf import make_pdf
 
 
 def _database(path):
@@ -26,7 +27,7 @@ def _database(path):
 
 
 def _pdf(path):
-    path.write_bytes(b"%PDF-1.7\n" + b"x" * 1200)
+    path.write_bytes(make_pdf())
 
 
 def test_attach_is_dry_run_by_default(tmp_path):
@@ -39,6 +40,15 @@ def test_attach_is_dry_run_by_default(tmp_path):
     assert result["results"][0]["status"] == "would_attach"
     with sqlite3.connect(db) as connection:
         assert connection.execute("select count(*) from itemAttachments").fetchone()[0] == 0
+
+
+def test_attach_rejects_header_only_or_truncated_pdf(tmp_path):
+    db = tmp_path / "zotero.sqlite"
+    pdf = tmp_path / "broken.pdf"
+    _database(db)
+    pdf.write_bytes(b"%PDF-1.7\n" + b"x" * 2048)
+    result = attach_linked_pdfs(db, [{"key": "ABCDEFGH", "filepath": str(pdf)}])
+    assert result["results"][0]["status"] == "missing_or_not_pdf"
 
 
 def test_attach_writes_linked_pdf_and_backup(tmp_path, monkeypatch):

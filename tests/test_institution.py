@@ -14,6 +14,7 @@ from doi2pdf.institution import (
     profile_lock,
 )
 from doi2pdf.publisher_routes import route_for
+from tests._pdf import make_pdf
 
 
 def test_openathens_target_is_percent_encoded():
@@ -120,7 +121,7 @@ def test_validated_learned_selector_is_reused_and_promoted(tmp_path):
 
         @staticmethod
         def body():
-            return b"%PDF-1.7\n" + b"x" * 1200
+            return make_pdf()
 
     class Request:
         @staticmethod
@@ -183,6 +184,33 @@ def test_cloudflare_challenge_is_reported_explicitly():
     content, status = browser._generic_or_meta(Page(), type("Context", (), {"request": None})(), [], "10.1056/NEJMoa2600157", None)
     assert content is None
     assert status == "cf_challenge"
+
+
+def test_playwright_pdf_body_honors_declared_size_before_reading():
+    class Response:
+        headers = {"content-length": str(100 * 1024 * 1024 + 1)}
+
+        @staticmethod
+        def body():
+            raise AssertionError("oversize response body must not be read")
+
+    body, status = InstitutionalBrowser._playwright_body(Response())
+    assert body is None
+    assert status == "pdf_too_large"
+
+
+def test_playwright_pdf_body_honors_post_read_limit(monkeypatch):
+    class Response:
+        headers = {}
+
+        @staticmethod
+        def body():
+            return b"123456789"
+
+    monkeypatch.setattr("doi2pdf.institution.MAX_PDF_BYTES", 8)
+    body, status = InstitutionalBrowser._playwright_body(Response())
+    assert body is None
+    assert status == "pdf_too_large"
 
 
 def test_llm_endpoint_requires_https_or_loopback():

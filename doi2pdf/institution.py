@@ -11,7 +11,13 @@ from urllib.parse import quote, urljoin, urlsplit
 
 from .config import Settings
 from .holdings import Holdings
-from .http import looks_like_challenge_text, looks_like_pdf
+from .http import (
+    MAX_PDF_BYTES,
+    has_pdf_magic,
+    looks_like_challenge_text,
+    pdf_validation_status,
+    response_declared_too_large,
+)
 from .learned_rules import RuleStore
 from .llm_ranker import rank as llm_rank
 from .publisher_routes import (
@@ -190,8 +196,11 @@ class InstitutionalBrowser:
 
     @staticmethod
     def _response_status(response, body: bytes) -> str:
-        if looks_like_pdf(body):
+        validation = pdf_validation_status(body)
+        if validation == "pdf":
             return "pdf"
+        if has_pdf_magic(body):
+            return validation
         head = body[:4000].lower()
         if response.status == 429 or b"too many requests" in head or b"rate limit" in head:
             return "rate_limited"
@@ -204,6 +213,16 @@ class InstitutionalBrowser:
         if "/login" in (response.url or ""):
             return "auth_required"
         return f"http_{response.status}"
+
+    @staticmethod
+    def _playwright_body(response) -> tuple[bytes | None, str]:
+        """Apply the same hard PDF limit to Playwright's in-memory body API."""
+        if response_declared_too_large(response):
+            return None, "pdf_too_large"
+        body = response.body()
+        if len(body) > MAX_PDF_BYTES:
+            return None, "pdf_too_large"
+        return body, "body"
 
     @classmethod
     def _looks_like_challenge(cls, page, document: str = "") -> bool:
@@ -221,7 +240,9 @@ class InstitutionalBrowser:
                 url, headers={"Referer": referer} if referer else {},
                 timeout=max(5_000, self.settings.request_timeout_s * 1000),
             )
-            body = response.body()
+            body, body_status = self._playwright_body(response)
+            if body is None:
+                return None, body_status
             status = self._response_status(response, body)
             if status == "pdf":
                 return body, status
@@ -461,8 +482,8 @@ class InstitutionalBrowser:
                 def inspect(response):
                     if "pdf" in (response.headers.get("content-type") or "").lower():
                         try:
-                            body = response.body()
-                            if looks_like_pdf(body):
+                            body, _ = self._playwright_body(response)
+                            if body is not None and pdf_validation_status(body) == "pdf":
                                 captured.append(body)
                         except Exception:
                             pass

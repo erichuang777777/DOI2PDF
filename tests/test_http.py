@@ -2,10 +2,11 @@ import http.server
 import socketserver
 import threading
 
-from doi2pdf.http import PDF_MAGIC, HttpClient, looks_like_challenge_text
+from doi2pdf.http import MAX_PDF_BYTES, HttpClient, looks_like_challenge_text, pdf_validation_status, read_bounded_response
+from tests._pdf import make_pdf
 
 
-PDF_BYTES = PDF_MAGIC + b" test\n" + b"0" * 2048
+PDF_BYTES = make_pdf()
 
 
 def _serve(responses):
@@ -21,6 +22,27 @@ def _serve(responses):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def log_message(self, format, *args):
+            pass
+
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, calls
+
+
+def _serve_declared_size(size: int, body: bytes = b""):
+    calls: list[str] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            calls.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Length", str(size))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
 
         def log_message(self, format, *args):
             pass
@@ -69,6 +91,46 @@ def test_fetch_pdf_reports_challenge_pages_explicitly():
         assert len(calls) == 1
     finally:
         server.shutdown()
+
+
+def test_fetch_pdf_rejects_declared_oversize_before_reading_body():
+    server, calls = _serve_declared_size(MAX_PDF_BYTES + 1)
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/paper.pdf"
+        client = HttpClient("test@example.org", timeout=5, max_retries=0, block_private_hosts=False)
+        content, status = client.fetch_pdf(url)
+        assert content is None
+        assert status == "pdf_too_large"
+        assert len(calls) == 1
+    finally:
+        server.shutdown()
+
+
+def test_pdf_validation_rejects_truncated_and_header_only_files():
+    assert pdf_validation_status(b"%PDF-1.7\n" + b"x" * 2048) == "pdf_missing_eof"
+    assert pdf_validation_status(b"%PDF-1.7\n") == "pdf_too_small"
+    assert pdf_validation_status(b"<html>not a PDF</html>") == "not_pdf"
+    assert pdf_validation_status(PDF_BYTES) == "pdf"
+
+
+def test_stream_limit_stops_after_crossing_bound_without_content_length():
+    class ChunkedResponse:
+        headers = {}
+
+        @staticmethod
+        def iter_content(chunk_size):
+            yield b"12345"
+            yield b"67890"
+            raise AssertionError("reader should stop immediately after exceeding the bound")
+
+    content, status = read_bounded_response(ChunkedResponse(), maximum=8)
+    assert content is None
+    assert status == "pdf_too_large"
+
+
+def test_pdf_validation_rejects_structurally_invalid_pdf_with_eof_marker():
+    content = b"%PDF-1.7\n" + b"x" * 2048 + b"\n%%EOF\n"
+    assert pdf_validation_status(content) == "pdf_invalid_structure"
 
 
 def test_normal_cloudflare_asset_reference_is_not_a_challenge():

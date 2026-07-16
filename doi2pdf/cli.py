@@ -234,19 +234,27 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
     if args.command == "doctor":
         issues = settings.validate()
-        ready = not issues
+        configuration_ok = not issues
+        setup_complete = settings.setup_complete
+        ready = configuration_ok and setup_complete
+        status = "ready" if ready else ("invalid_configuration" if issues else "setup_required")
         payload = {
             "schema": 1,
             "ok": ready,
             "command": "doctor",
-            "status": "ready" if ready else "setup_required",
+            "status": status,
+            "configuration_ok": configuration_ok,
             "issues": issues,
             "setup_command": "doi2pdf-web",
-            "web_setup_complete": not settings.needs_setup(),
+            "web_setup_complete": setup_complete,
             "network_mode": settings.normalized_network_mode(),
             "effective_network_mode": settings.effective_network_mode(),
             "routes": {
-                "open_access": bool(settings.unpaywall_email),
+                "open_access": True,
+                "unpaywall": bool(settings.unpaywall_email),
+                "openalex": True,
+                "pmc": True,
+                "arxiv": True,
                 "publisher_tdm": bool(settings.elsevier_api_key or settings.wiley_tdm_token or settings.springer_api_key),
                 "institution": settings.allow_institutional_fallback(),
                 "resolver": bool(settings.resolver_template),
@@ -255,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
                 "llm_assisted_discovery": settings.llm_enabled,
             },
         }
-        _emit(args, payload, "configuration OK" if payload["ok"] else "\n".join(issues or ["Run doi2pdf-web to finish setup."]), error=not payload["ok"])
+        _emit(args, payload, "configuration OK" if ready else "\n".join(issues or ["Run doi2pdf-web to finish setup."]), error=not ready)
         return EXIT_OK if payload["ok"] else EXIT_INPUT_OR_CONFIG
     if args.command == "login":
         try:

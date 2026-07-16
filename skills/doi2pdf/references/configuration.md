@@ -10,6 +10,12 @@ The local console uses `/` for fetch, `/acceptance` for the real one-at-a-time t
 readiness. Progress APIs intentionally omit local paths, secret values, cookies, headers, and
 candidate URLs.
 
+`doctor --json` and `/health` expose separate readiness signals: `configuration_ok` validates
+saved values, while `web_setup_complete` (CLI) or `setup_complete` (Web) records completion of
+the guided wizard. Agents must use top-level `ok`; they must not infer readiness from an empty
+`issues` list alone. `setup_required` opens the wizard, while `invalid_configuration` opens the
+settings page and reports only the sanitized validation issues.
+
 Each API field in `/configure` links to the provider's official application instructions:
 
 - PubMed/NCBI: `https://www.ncbi.nlm.nih.gov/account/settings/`
@@ -32,6 +38,10 @@ Each API field in `/configure` links to the provider's official application inst
 | `DOI2PDF_SETUP_COMPLETE` | First-run web wizard state | Written by UI |
 | `DOWNLOAD_DIR` | Default local PDF folder | Optional |
 | `PAPER_RADAR_DB` | Read-only `papers(doi, oa_pdf_url)` fallback | Optional |
+
+PDF responses are streamed with a fixed 100 MiB safety ceiling; API metadata and landing pages
+use a 10 MiB ceiling. A file is accepted only after structural parsing confirms at least one
+page. These limits are product safety boundaries and are not exposed as settings.
 
 ## Official publisher TDM
 

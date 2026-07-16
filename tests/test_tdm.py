@@ -1,9 +1,9 @@
 from doi2pdf.config import Settings
-from doi2pdf.http import PDF_MAGIC
 from doi2pdf.tdm import TDMResolver
+from tests._pdf import make_pdf
 
 
-PDF = PDF_MAGIC + b" test\n" + b"0" * 2048
+PDF = make_pdf()
 
 
 class Response:
@@ -14,6 +14,12 @@ class Response:
 
     def json(self):
         return self._payload
+
+    def iter_content(self, chunk_size):
+        yield self.content
+
+    def close(self):
+        pass
 
 
 def test_elsevier_uses_official_endpoint_and_key(monkeypatch):

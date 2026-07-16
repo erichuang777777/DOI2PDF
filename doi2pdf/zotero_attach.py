@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .http import looks_like_pdf
+from .http import MAX_PDF_BYTES, looks_like_pdf
 
 
 def zotero_running() -> bool:
@@ -57,11 +57,10 @@ def attach_linked_pdfs(database: Path, entries: list[dict[str, Any]], *, write: 
     normalized = []
     for entry in entries:
         path = Path(entry["filepath"]).expanduser().resolve()
-        header = b""
-        if path.is_file():
-            with path.open("rb") as handle:
-                header = handle.read(4096)
-        if not path.is_file() or not looks_like_pdf(header):
+        valid_pdf = False
+        if path.is_file() and path.stat().st_size <= MAX_PDF_BYTES:
+            valid_pdf = looks_like_pdf(path.read_bytes())
+        if not valid_pdf:
             normalized.append({"item_key": entry.get("key"), "file": str(path), "status": "missing_or_not_pdf"})
         else:
             normalized.append({"item_key": str(entry.get("key") or "").strip(), "file": str(path), "status": "pending", "path": path})

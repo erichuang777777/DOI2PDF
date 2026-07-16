@@ -11,18 +11,43 @@ def test_doctor_json_is_agent_ready_and_accepts_trailing_flag(capsys, monkeypatc
     monkeypatch.setattr(
         cli.Settings,
         "from_env",
-        lambda: Settings(contact_email="agent@example.org", unpaywall_email="agent@example.org", network_mode="campus", openathens_redirector_prefix="https://go.openathens.net/redirector/example?url="),
+        lambda: Settings(contact_email="agent@example.org", unpaywall_email="agent@example.org", network_mode="campus", openathens_redirector_prefix="https://go.openathens.net/redirector/example?url=", setup_complete=True),
     )
     assert cli.main(["doctor", "--json"]) == cli.EXIT_OK
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
     assert payload["status"] == "ready"
     assert payload["setup_command"] == "doi2pdf-web"
-    assert payload["web_setup_complete"] is False
+    assert payload["configuration_ok"] is True
+    assert payload["web_setup_complete"] is True
     assert payload["network_mode"] == "campus"
     assert payload["effective_network_mode"] == "campus"
     assert payload["routes"]["open_access"] is True
     assert payload["routes"]["institution"] is True
+
+
+def test_doctor_requires_first_time_setup_even_when_configuration_is_valid(capsys, monkeypatch):
+    monkeypatch.setattr(
+        cli.Settings,
+        "from_env",
+        lambda: Settings(contact_email="agent@example.org", unpaywall_email="agent@example.org", setup_complete=False),
+    )
+    assert cli.main(["doctor", "--json"]) == cli.EXIT_INPUT_OR_CONFIG
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["status"] == "setup_required"
+    assert payload["configuration_ok"] is True
+    assert payload["web_setup_complete"] is False
+    assert payload["issues"] == []
+
+
+def test_doctor_distinguishes_invalid_configuration_from_setup(capsys, monkeypatch):
+    monkeypatch.setattr(cli.Settings, "from_env", lambda: Settings(contact_email="you@example.org", setup_complete=True))
+    assert cli.main(["doctor", "--json"]) == cli.EXIT_INPUT_OR_CONFIG
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "invalid_configuration"
+    assert payload["configuration_ok"] is False
+    assert payload["web_setup_complete"] is True
 
 
 def test_invalid_identifier_json_stays_on_stdout(capsys, monkeypatch):
