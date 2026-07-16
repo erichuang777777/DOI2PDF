@@ -12,7 +12,7 @@ from pathlib import Path
 
 # A movable tag lets a retagged release silently change the installed code.
 # Set DOI2PDF_INSTALL_REF to a commit SHA to pin the git fallback immutably.
-RELEASE = os.getenv("DOI2PDF_INSTALL_REF", "v0.8.4")
+RELEASE = os.getenv("DOI2PDF_INSTALL_REF", "v0.8.5")
 REPOSITORY = "https://github.com/erichuang777777/DOI2PDF.git"
 
 

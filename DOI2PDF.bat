@@ -18,12 +18,12 @@ if not exist ".venv\Scripts\python.exe" (
   if errorlevel 1 goto :failed
 )
 
-if not exist ".venv\.doi2pdf-installed-0.8.4" (
+if not exist ".venv\.doi2pdf-installed-0.8.5" (
   echo [DOI2PDF] Installing the lightweight application and web console...
   ".venv\Scripts\python.exe" -m pip install --upgrade pip
   ".venv\Scripts\python.exe" -m pip install -e ".[web]"
   if errorlevel 1 goto :failed
-  type nul > ".venv\.doi2pdf-installed-0.8.4"
+  type nul > ".venv\.doi2pdf-installed-0.8.5"
 )
 
 if not exist ".env" copy /y ".env.example" ".env" >nul
