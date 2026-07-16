@@ -78,10 +78,14 @@ concurrently; institutional requests retain their separate persistent rate limit
 ## One-click Windows app
 
 Double-click **`DOI2PDF.bat`**. On the first run it creates an isolated environment,
-installs DOI2PDF, Playwright, and Chromium, copies the local settings template, starts the server on
+installs the lightweight DOI2PDF core and web console, copies the local settings template, starts the server on
 `127.0.0.1`, and opens a guided browser setup. Enter a real contact email, choose the PDF
 folder, and optionally add your own library access links or publisher API keys. Later starts
 reuse the installation and go directly to retrieval.
+
+OA, publisher APIs, resolvers, Zotero integration, and the console do not require a bundled
+browser. Only run **`DOI2PDF-browser-setup.bat`** when authorized OpenAthens/EZproxy access
+or visible publisher verification is needed; it installs Playwright and Chromium on demand.
 
 The interface accepts a DOI, DOI URL, PMID, or exact title and shows the complete route
 report. After success, use **Open PDF** to view it in the browser or **Download a copy** to
@@ -111,9 +115,11 @@ profile's `access_log.jsonl` without credentials or cookies.
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .
-playwright install chromium
 Copy-Item .env.example .env
 ```
+
+For authorized institutional browser access, install it separately with
+`pip install -e ".[browser]"` followed by `playwright install chromium`.
 
 Fill in your email, and only the API keys/library endpoints you actually use. Do not put
 OpenAthens passwords in `.env`; login happens in the browser and cookies remain in the

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.4 - 2026-07-16
+
+- Made the Windows one-click setup lightweight by default: OA, APIs, Zotero, resolver, CLI,
+  and the web console no longer download Playwright or Chromium during first launch.
+- Added `DOI2PDF-browser-setup.bat` for explicit on-demand installation when authorized
+  OpenAthens, EZproxy, or visible publisher verification is needed.
+- Kept the agent skill installer lightweight by default and retained `--with-browser` as its
+  matching explicit opt-in.
+
 ## 0.8.3 - 2026-07-16
 
 - Made browser-use assistance explicitly disabled by default, including when browser-use was
