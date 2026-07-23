@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "python-dotenv>=1.2.2",
     "requests>=2.34.2",
-    "beautifulsoup4>=4.12.0",
+    "beautifulsoup4>=4.15.0",
     "defusedxml>=0.7.1",
     "pypdf>=6.13.3,<7",
 ]
