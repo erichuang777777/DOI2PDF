@@ -23,6 +23,17 @@ def _csv(name: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in os.getenv(name, "").split(",") if part.strip())
 
 
+def _path(value: str) -> Path:
+    """Expand %VAR%/$VAR and ~ before building a Path.
+
+    Env vars that carry unexpanded shell syntax (e.g. a literal
+    ``%USERPROFILE%`` set from a shell that doesn't expand it) would
+    otherwise be taken at face value, silently creating a directory
+    named ``%USERPROFILE%`` instead of resolving to the real home dir.
+    """
+    return Path(os.path.expandvars(value)).expanduser()
+
+
 def _number(name: str, default: int | float, cast, issues: list[str]):
     value = os.getenv(name)
     if value is None:
@@ -125,15 +136,15 @@ class Settings:
             library_password_selector=os.getenv("LIBRARY_PASSWORD_SELECTOR", "input[name='pass'],#id_password"),
             library_submit_selector=os.getenv("LIBRARY_SUBMIT_SELECTOR", "form button[type='submit'],form input[type='submit']"),
             resolver_template=os.getenv("LIBRARY_RESOLVER_TEMPLATE", ""),
-            paper_radar_db=Path(value) if (value := os.getenv("PAPER_RADAR_DB", "")) else None,
-            holdings_db=Path(value) if (value := os.getenv("HOLDINGS_DB", "")) else None,
+            paper_radar_db=_path(value) if (value := os.getenv("PAPER_RADAR_DB", "")) else None,
+            holdings_db=_path(value) if (value := os.getenv("HOLDINGS_DB", "")) else None,
             llm_enabled=_bool("DOI2PDF_LLM_ENABLED", False),
             llm_base_url=os.getenv("DOI2PDF_LLM_BASE_URL", "").rstrip("/"),
             llm_model=os.getenv("DOI2PDF_LLM_MODEL", ""),
             llm_api_key=os.getenv("DOI2PDF_LLM_API_KEY", ""),
-            download_dir=Path(os.getenv("DOWNLOAD_DIR", "downloads")),
+            download_dir=_path(os.getenv("DOWNLOAD_DIR", "downloads")),
             setup_complete=_bool("DOI2PDF_SETUP_COMPLETE", False),
-            browser_profile=Path(os.getenv("DOI2PDF_BROWSER_PROFILE", str(Path.home() / ".doi2pdf" / "browser"))),
+            browser_profile=_path(os.getenv("DOI2PDF_BROWSER_PROFILE", str(Path.home() / ".doi2pdf" / "browser"))),
             browser_headless=_bool("DOI2PDF_BROWSER_HEADLESS", False),
             request_timeout_s=max(5, min(300, _number("DOI2PDF_REQUEST_TIMEOUT_S", 45, int, parse_issues))),
             http_max_retries=max(0, min(10, _number("DOI2PDF_HTTP_MAX_RETRIES", 3, int, parse_issues))),

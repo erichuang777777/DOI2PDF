@@ -18,6 +18,13 @@ def test_auto_network_mode_matches_configured_local_cidr(monkeypatch):
     assert Settings(campus_cidrs=("10.0.0.0/8",)).effective_network_mode() == "off_campus"
 
 
+def test_browser_profile_expands_unexpanded_shell_variables(monkeypatch):
+    monkeypatch.setenv("DOI2PDF_BROWSER_PROFILE", "%USERPROFILE%/.doi2pdf/browser")
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\test")
+    settings = Settings.from_env()
+    assert "%USERPROFILE%" not in str(settings.browser_profile)
+
+
 def test_access_urls_reject_embedded_credentials():
     settings = Settings(
         contact_email="user@example.org",
