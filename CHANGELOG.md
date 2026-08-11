@@ -13,6 +13,8 @@
 - Tightened the local web console's layout spacing.
 - Pinned `ruff` to an exact version in CI, release, and the `dev` extra; the previously unpinned
   install let CI silently drift onto newer ruff releases with different default lint rules.
+- Constrained the `mcp` dependency to `<2`; the unconstrained `>=1.26.0` picked up the breaking
+  `mcp` 2.0.0 release, which removed `mcp.server.fastmcp`.
 
 ## 0.8.5 - 2026-07-16
 
