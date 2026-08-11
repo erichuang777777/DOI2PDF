@@ -19,10 +19,13 @@ def test_auto_network_mode_matches_configured_local_cidr(monkeypatch):
 
 
 def test_browser_profile_expands_unexpanded_shell_variables(monkeypatch):
-    monkeypatch.setenv("DOI2PDF_BROWSER_PROFILE", "%USERPROFILE%/.doi2pdf/browser")
-    monkeypatch.setenv("USERPROFILE", r"C:\Users\test")
+    # $VAR/${VAR} expands on every platform (unlike Windows-only %VAR%), so this
+    # portably exercises the same os.path.expandvars() call the real bug needs.
+    monkeypatch.setenv("DOI2PDF_BROWSER_PROFILE", "$DOI2PDF_TEST_HOME/.doi2pdf/browser")
+    monkeypatch.setenv("DOI2PDF_TEST_HOME", "/home/test")
     settings = Settings.from_env()
-    assert "%USERPROFILE%" not in str(settings.browser_profile)
+    assert "$DOI2PDF_TEST_HOME" not in str(settings.browser_profile)
+    assert "test" in str(settings.browser_profile)
 
 
 def test_access_urls_reject_embedded_credentials():
