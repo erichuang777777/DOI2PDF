@@ -55,9 +55,9 @@ Playwright context and must pass magic-byte validation. Successful selectors are
 private browser profile, promoted after two successes, and disabled after three consecutive
 failures. The store never retains candidate URLs, signed parameters, cookies, or credentials.
 
-The local web interface is a loopback-only wrapper around the same package. It has no
-separate retrieval logic, so CLI, web, Zotero batch, and agent-skill behavior share the same
-validation and safety invariants.
+The local web interface and the optional MCP server (`doi2pdf-mcp`) are both loopback/stdio
+wrappers around the same package. Neither has separate retrieval logic, so CLI, web, MCP, Zotero
+batch, and agent-skill behavior share the same validation and safety invariants.
 
 Acceptance testing uses a small source-controlled corpus of real DOI records with a dated
 no-access baseline. The CLI lists cases and the web console submits exactly one case through

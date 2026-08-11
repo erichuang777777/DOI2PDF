@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.6 - 2026-08-12
+
+- Added an optional MCP server (`doi2pdf-mcp`, `[mcp]` extra) exposing `resolve_identifier`,
+  `fetch_pdf`, `check_setup`, `list_publisher_routes`, `check_holdings`, and `check_api_keys` as
+  MCP tools for hosts without shell access to the CLI (Claude Desktop, claude.ai). It wraps the
+  same `DOI2PDF.fetch()` orchestrator the CLI and web console use; interactive/state-mutating
+  commands (`login`, `browser-assist`, Zotero writes) stay CLI/web-only.
+- Fixed `DOI2PDF_BROWSER_PROFILE`/`DOWNLOAD_DIR`/`PAPER_RADAR_DB`/`HOLDINGS_DB` to expand
+  unexpanded shell variables (e.g. a literal `%USERPROFILE%` from a shell that doesn't expand it)
+  instead of taking them at face value.
+- Tightened the local web console's layout spacing.
+
 ## 0.8.5 - 2026-07-16
 
 - Replaced the browser-use environment-variable gate with runtime detection of optional

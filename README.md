@@ -51,6 +51,37 @@ Agents call the global `doi2pdf` command and parse one JSON envelope from stdout
 If setup is required, they launch `doi2pdf-web`; API keys are entered only in the local HTML
 page, stored in the ignored `.env`, and never rendered back to the browser or agent.
 
+## MCP server
+
+For hosts without shell access to the `doi2pdf` CLI (Claude Desktop, claude.ai, or any other
+MCP client), install the `mcp` extra and run the bundled stdio server:
+
+```powershell
+pip install -e ".[mcp]"
+doi2pdf-mcp
+```
+
+It is a thin wrapper around the same `DOI2PDF.fetch()` orchestrator the CLI and web console use —
+no separate retrieval logic, so the same lawful-route ladder and safety invariants apply. It
+exposes six tools: `resolve_identifier`, `fetch_pdf`, `check_setup` (equivalent to `doctor`),
+`list_publisher_routes`, `check_holdings`, and `check_api_keys`. Settings are read from the same
+`.env` used by the CLI and web console (reloaded on every call, so changes made in the web
+console's Settings page take effect immediately). Interactive or state-mutating operations
+(`login`, `browser-assist`, writing Zotero attachments) are intentionally not exposed as MCP
+tools; use the CLI or web console for those.
+
+Add it to a host's MCP config with a stdio command, for example:
+
+```json
+{
+  "mcpServers": {
+    "doi2pdf": {
+      "command": "C:\\path\\to\\DOI2PDF\\.venv\\Scripts\\doi2pdf-mcp.exe"
+    }
+  }
+}
+```
+
 ## Local web console
 
 The local-only console provides five operational views:

@@ -139,20 +139,20 @@ def _layout(title: str, body: str) -> str:
 <title>{html.escape(title)} · DOI2PDF</title>
 <style>
 :root{{--ink:#17212b;--muted:#637083;--blue:#1769aa;--pale:#eef6fc;--line:#d9e3ec;--ok:#137333;--bad:#b3261e}}
-*{{box-sizing:border-box}} body{{margin:0;background:#f6f8fa;color:var(--ink);font:16px/1.5 system-ui,"Segoe UI",sans-serif}}
-main{{max-width:900px;margin:36px auto;padding:0 20px}} .card{{background:white;border:1px solid var(--line);border-radius:14px;padding:24px;margin:18px 0;box-shadow:0 4px 20px #15324b0d}}
-h1{{font-size:2rem;margin:.2rem 0}} h2{{font-size:1.2rem;margin-top:0}} .muted{{color:var(--muted)}}
-label{{display:block;font-weight:650;margin-top:14px}} input{{width:100%;padding:11px;border:1px solid #aebdca;border-radius:8px;font:inherit}}
-.check{{display:flex;gap:9px;align-items:center;font-weight:500}} .check input{{width:auto}}
-button,.button{{display:inline-block;background:var(--blue);color:white;border:0;border-radius:9px;padding:11px 18px;font-weight:700;text-decoration:none;cursor:pointer;margin-top:18px}}
-.secondary{{background:#596b7b}} .success{{background:var(--ok)}} table{{width:100%;border-collapse:collapse;font-size:.9rem}} th,td{{text-align:left;border-bottom:1px solid var(--line);padding:8px;vertical-align:top;word-break:break-word}}
-.ok{{color:var(--ok);font-weight:700}} .bad{{color:var(--bad);font-weight:700}} code{{background:var(--pale);padding:2px 5px;border-radius:4px}} nav a{{margin-right:14px}}
-.steps{{display:flex;gap:8px;margin:20px 0}} .step{{flex:1;padding:9px;text-align:center;border-radius:8px;background:#e8edf2;color:var(--muted);font-size:.9rem}} .step.active{{background:var(--blue);color:white;font-weight:700}}
-.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}} .status{{border:1px solid var(--line);border-radius:9px;padding:12px}} .status strong{{display:block}}
-details{{margin-top:16px}} select{{width:100%;padding:11px;border:1px solid #aebdca;border-radius:8px;font:inherit;background:white}}
-#working{{display:none;position:fixed;inset:0;background:#f6f8faf2;z-index:9;align-items:center;justify-content:center;text-align:center;padding:20px}} #working.show{{display:flex}} .spinner{{width:48px;height:48px;border:5px solid #dbe7f0;border-top-color:var(--blue);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 18px}} @keyframes spin{{to{{transform:rotate(360deg)}}}}
-.progress-track{{height:16px;background:#e1e8ee;border-radius:999px;overflow:hidden}} .progress-bar{{height:100%;width:0;background:var(--blue);transition:width .35s ease}}
-.log{{list-style:none;padding:0;margin:0;max-height:360px;overflow:auto}} .log li{{padding:9px 0;border-bottom:1px solid var(--line);font-family:ui-monospace,Consolas,monospace;font-size:.86rem}} .pill{{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--pale);font-size:.78rem}}
+*{{box-sizing:border-box}} body{{margin:0;background:#f6f8fa;color:var(--ink);font:15px/1.4 system-ui,"Segoe UI",sans-serif}}
+main{{max-width:900px;margin:16px auto;padding:0 16px}} .card{{background:white;border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0;box-shadow:0 2px 10px #15324b0d}}
+h1{{font-size:1.5rem;margin:.1rem 0}} h2{{font-size:1rem;margin:0 0 6px}} .muted{{color:var(--muted)}}
+label{{display:block;font-weight:650;margin-top:8px;font-size:.92rem}} input{{width:100%;padding:8px;border:1px solid #aebdca;border-radius:7px;font:inherit}}
+.check{{display:flex;gap:8px;align-items:center;font-weight:500}} .check input{{width:auto}}
+button,.button{{display:inline-block;background:var(--blue);color:white;border:0;border-radius:8px;padding:8px 14px;font-weight:700;text-decoration:none;cursor:pointer;margin-top:10px}}
+.secondary{{background:#596b7b}} .success{{background:var(--ok)}} table{{width:100%;border-collapse:collapse;font-size:.86rem}} th,td{{text-align:left;border-bottom:1px solid var(--line);padding:5px 6px;vertical-align:top;word-break:break-word}}
+.ok{{color:var(--ok);font-weight:700}} .bad{{color:var(--bad);font-weight:700}} code{{background:var(--pale);padding:2px 5px;border-radius:4px}} nav{{margin-bottom:6px}} nav a{{margin-right:12px;font-size:.92rem}}
+.steps{{display:flex;gap:6px;margin:10px 0}} .step{{flex:1;padding:6px;text-align:center;border-radius:7px;background:#e8edf2;color:var(--muted);font-size:.84rem}} .step.active{{background:var(--blue);color:white;font-weight:700}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}} .status{{border:1px solid var(--line);border-radius:8px;padding:8px}} .status strong{{display:block}}
+details{{margin-top:10px}} select{{width:100%;padding:8px;border:1px solid #aebdca;border-radius:7px;font:inherit;background:white}}
+#working{{display:none;position:fixed;inset:0;background:#f6f8faf2;z-index:9;align-items:center;justify-content:center;text-align:center;padding:20px}} #working.show{{display:flex}} .spinner{{width:40px;height:40px;border:5px solid #dbe7f0;border-top-color:var(--blue);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 14px}} @keyframes spin{{to{{transform:rotate(360deg)}}}}
+.progress-track{{height:12px;background:#e1e8ee;border-radius:999px;overflow:hidden}} .progress-bar{{height:100%;width:0;background:var(--blue);transition:width .35s ease}}
+.log{{list-style:none;padding:0;margin:0;max-height:320px;overflow:auto}} .log li{{padding:6px 0;border-bottom:1px solid var(--line);font-family:ui-monospace,Consolas,monospace;font-size:.82rem}} .pill{{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--pale);font-size:.76rem}}
 </style></head><body><main><nav><a href="/">Fetch</a><a href="/acceptance">Acceptance</a><a href="/routes">Routes</a><a href="/rules">Learned rules</a><a href="/activity">Activity</a><a href="/configure">Settings</a><a href="/health">Health</a></nav>{body}</main></body></html>"""
 
 

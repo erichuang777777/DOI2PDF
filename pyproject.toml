@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doi2pdf"
-version = "0.8.5"
+version = "0.8.6"
 description = "Lawful DOI-to-PDF retrieval through OA, publisher TDM, institutional access, and library resolvers"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -35,10 +35,14 @@ web = [
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
 ]
+mcp = [
+    "mcp>=1.26.0",
+]
 dev = [
     "playwright>=1.61.0",
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
+    "mcp>=1.26.0",
 
     "build>=1.5.0",
     "pytest>=8.0",
@@ -51,6 +55,7 @@ dev = [
 [project.scripts]
 doi2pdf = "doi2pdf.cli:main"
 doi2pdf-web = "doi2pdf.web:main"
+doi2pdf-mcp = "doi2pdf.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/erichuang777777/DOI2PDF"
