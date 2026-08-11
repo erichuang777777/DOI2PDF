@@ -23,7 +23,7 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[web]" pytest pyyaml ruff
+      - run: python -m pip install -e ".[web]" pytest pyyaml "ruff==0.15.21"
       - run: ruff check doi2pdf tests
       - run: python -m pytest -q
       - run: python -m compileall -q doi2pdf

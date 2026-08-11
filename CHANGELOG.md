@@ -11,6 +11,8 @@
   unexpanded shell variables (e.g. a literal `%USERPROFILE%` from a shell that doesn't expand it)
   instead of taking them at face value.
 - Tightened the local web console's layout spacing.
+- Pinned `ruff` to an exact version in CI, release, and the `dev` extra; the previously unpinned
+  install let CI silently drift onto newer ruff releases with different default lint rules.
 
 ## 0.8.5 - 2026-07-16
 
